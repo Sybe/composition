@@ -38,6 +38,8 @@
 #define LACE_ME
 #endif
 
+hre_context_t ctx;
+
 static ltsmin_expr_t mu_expr = NULL;
 static char* ctl_formula = NULL;
 static char* mu_formula  = NULL;
@@ -47,6 +49,7 @@ static char* transitions_save_filename = NULL;
 static char* transitions_load_filename = NULL;
 
 static char* trc_output = NULL;
+static char* trc_type   = "gcf";
 static int   dlk_detect = 0;
 static char* act_detect = NULL;
 static char* inv_detect = NULL;
@@ -214,7 +217,8 @@ static  struct poptOption options[] = {
     { "action" , 0 , POPT_ARG_STRING , &act_detect , 0 , "detect action prefix" , "<action prefix>" },
     { "invariant", 'i', POPT_ARG_STRING, &inv_detect, 1, "detect invariant violations", NULL },
     { "no-exit", 'n', POPT_ARG_VAL, &no_exit, 1, "no exit on error, just count (for error counters use -v)", NULL },
-    { "trace" , 0 , POPT_ARG_STRING , &trc_output , 0 , "file to write trace to" , "<lts-file>.gcf" },
+    { "trace" , 0 , POPT_ARG_STRING , &trc_output , 0 , "file to write trace to" , "<lts-file>" },
+    { "type", 0, POPT_ARG_STRING|POPT_ARGFLAG_SHOW_DEFAULT, &trc_type, 0, "trace type to write", "<aut|gcd|gcf|dir|fsm|bcg>" },
     { "save-transitions", 0 , POPT_ARG_STRING, &transitions_save_filename, 0, "file to write transition relations to", "<outputfile>" },
     { "load-transitions", 0 , POPT_ARG_STRING, &transitions_load_filename, 0, "file to read transition relations from", "<inputfile>" },
     { "mu" , 0 , POPT_ARG_STRING , &mu_formula , 0 , "file with a mu formula" , "<mu-file>.mu" },
@@ -242,6 +246,7 @@ typedef struct {
 static lts_type_t ltstype;
 static int N;
 static int eLbls;
+static int sLbls;
 static int nGuards;
 static int nGrps;
 static int max_sat_levels;
@@ -275,19 +280,24 @@ typedef void (*sat_proc_t)(reach_proc_t reach_proc, vset_t visited,
 typedef void (*guided_proc_t)(sat_proc_t sat_proc, reach_proc_t reach_proc,
                               vset_t visited, char *etf_output);
 
-typedef int (*transitions_short_t)(model_t model,int group,int*src,TransitionCB cb,void*context);
+typedef int (*transitions_t)(model_t model,int group,int*src,TransitionCB cb,void*context);
 
-static transitions_short_t* transitions_short; // which function to call for the next states.
+static transitions_t* transitions_short; // which function to call for the next states.
+static transitions_t* transitions_long;
 
-typedef int (*label_short_t)(model_t model,int label,int *state);
+typedef int (*label_t)(model_t model,int label,int *state);
 
-static label_short_t* label_short;
+static label_t* label_short;
+static label_t* label_long;
+
 #ifdef HAVE_SYLVAN
 
-enum MULTI_PROC_GB_CALL { NOOP = 0, TRANSITION = 1, LABEL = 2 };
+enum MULTI_PROC_GB_CALL { NOOP = 0, TRANSITION = 1, LABEL = 2, SHORT = 3, LONG = 4 };
 
-static transitions_short_t* transitions_short_multi; // which function to call in the multi-process environment.
-static label_short_t* label_short_multi;
+static transitions_t* transitions_short_multi; // which function to call in the multi-process environment.
+static transitions_t* transitions_long_multi;
+static label_t* label_short_multi;
+static label_t* label_long_multi;
 #endif
 
 
@@ -335,12 +345,13 @@ save_level(vset_t visited)
 static void
 write_trace_state(lts_file_t trace_handle, int src_no, int *state)
 {
-  int labels[nGuards];
+  int labels[sLbls];
 
   Warning(debug, "dumping state %d", src_no);
 
-  if (nGuards != 0)
-      GBgetStateLabelsAll(model, state, labels);
+  for (int i = 0; i < sLbls; i++) {
+      labels[i] = (*label_long)(model, i, state);
+  }
 
   lts_write_state(trace_handle, 0, state, labels);
 }
@@ -384,7 +395,9 @@ write_trace_step(lts_file_t trace_handle, int src_no, int *src,
     ctx.dst = dst;
     ctx.found = 0;
 
-    GBgetTransitionsAll(model, src, write_trace_next, &ctx);
+    for (int i = 0; i < nGrps && !ctx.found; i++) {
+        (*transitions_long)(model, i, src, write_trace_next, &ctx);
+    }
 
     if (!ctx.found)
         Abort("no matching transition found");
@@ -516,15 +529,17 @@ find_trace(int trace_end[][N], int end_count, int level, vset_t *levels, char* f
 {
     // Find initial state and open output file
     int             init_state[N];
-    lts_file_t      trace_output;
+    hre_context_t   n = HREctxCreate(0, 1, "blah", 0);
+    lts_file_t      trace_output = lts_vset_template();
     lts_type_t      ltstype = GBgetLTStype(model);
 
     GBgetInitialState(model, init_state);
+    lts_file_set_context(trace_output, n);
 
-    char* file_name=malloc((5+strlen(trc_output)+strlen(file_prefix))*sizeof(char));
-    sprintf(file_name, "%s%s.gcf", trc_output, file_prefix);
+    char* file_name=alloca((5+strlen(trc_output)+strlen(file_prefix))*sizeof(char));
+    sprintf(file_name, "%s%s.%s", trc_output, file_prefix, trc_type);
     Warning(info,"writing to file: %s",file_name);
-    trace_output = lts_file_create(file_name, ltstype, 1, lts_vset_template());
+    trace_output = lts_file_create(file_name, ltstype, 1, trace_output);
     lts_write_init(trace_output, 0, (uint32_t*)init_state);
     int T=lts_type_get_type_count(ltstype);
     for(int i=0;i<T;i++){
@@ -533,11 +548,10 @@ find_trace(int trace_end[][N], int end_count, int level, vset_t *levels, char* f
 
     // Generate trace
     rt_timer_t  timer = RTcreateTimer();
-
     RTstartTimer(timer);
     find_trace_to(trace_end, end_count, level, levels, trace_output);
     RTstopTimer(timer);
-    RTprintTimer(info, timer, "constructing trace took");
+    RTprintTimer(info, timer, "constructing trace for '%s' took", file_prefix);
 
     // Close output file
     lts_file_close(trace_output);
@@ -604,7 +618,7 @@ eval_guard (int guard, vset_t set)
     if (log_active(infoLong)) {
         bn_int_t elem_count;
         vset_count(guard_tmp[guard], NULL, &elem_count);
-        if (bn_int2double(&elem_count) >= 10000.0) {
+        if (bn_int2double(&elem_count) >= 10000.0 * SPEC_REL_PERF) {
             size_t size = 40;
             char s[size];
             bn_int2string(s, size, &elem_count);
@@ -634,11 +648,19 @@ eval_guard (int guard, vset_t set)
     vset_clear(guard_tmp[guard]);
 }
 
+struct trace_action {
+    int *dst;
+    int *cpy;
+    char *action;
+};
+
 struct group_add_info {
     vrel_t rel; // target relation
     vset_t set; // source set
     int group; // which transition group
     int *src; // state vector
+    int trace_count; // number of actions to trace after next-state call
+    struct trace_action *trace_action;
 };
 
 static void
@@ -679,7 +701,7 @@ group_add(void *context, transition_info_t *ti, int *dst, int *cpy)
         vrel_add(ctx->rel, ctx->src, dst);
     }
 
-    if (act_detect) {
+    if (act_detect && (no_exit || ErrorActions == 0)) {
         int act_index = ti->labels[act_label];
         if (seen_actions_test(act_index)) { // is this the first time we encounter this action?
             char *action=GBchunkGet(model,action_typeno,act_index).data;
@@ -688,18 +710,23 @@ group_add(void *context, transition_info_t *ti, int *dst, int *cpy)
                 Warning(info, "found action: %s", action);
 
                 if (trc_output) {
-                    int group = ctx->group;
-                    int* src=malloc(N*sizeof(int));
-                    vset_example_match(ctx->set,src,r_projs[group].len, r_projs[group].proj,ctx->src);
-                    
-                    find_action(src,dst,cpy,group,action);
+
+                    ctx->trace_action = (struct trace_action*) realloc(ctx->trace_action, (sizeof(struct trace_action) + sizeof(int[N])*2) * (ctx->trace_count+1));
+
+                    // set the right addresses in the allocated block
+                    ctx->trace_action[ctx->trace_count].dst = (int*) (&ctx->trace_action[ctx->trace_count] + sizeof(struct trace_action));
+                    ctx->trace_action[ctx->trace_count].cpy = (int*) (&ctx->trace_action[ctx->trace_count].dst + sizeof(int[N]));
+
+                    // set the required values in order to find the trace after the next-state call
+                    memcpy(ctx->trace_action[ctx->trace_count].dst, dst, w_projs[ctx->group].len);
+                    memcpy(ctx->trace_action[ctx->trace_count].cpy, cpy, w_projs[ctx->group].len);
+                    ctx->trace_action[ctx->trace_count].action = action;
+
+                    ctx->trace_count++;
                 }
-                if (no_exit) {
-                    ErrorActions++;
-                } else {
-                    Warning(info, "exiting now");
-                    HREabort(LTSMIN_EXIT_COUNTER_EXAMPLE);
-                }
+
+                // ErrorActions++
+                add_fetch(ErrorActions, 1);
             }
         }
     }
@@ -713,7 +740,19 @@ explore_cb(vrel_t rel, void *context, int *src)
     ctx.set = ((struct group_add_info*)context)->set;
     ctx.rel = rel;
     ctx.src = src;
+    ctx.trace_count = 0;
+    ctx.trace_action = NULL;
     (*transitions_short)(model, ctx.group, src, group_add, &ctx);
+
+    if (ctx.trace_count > 0) {
+        int long_src[N];
+        for (int i = 0; i < ctx.trace_count; i++) {
+            vset_example_match(ctx.set,long_src,r_projs[ctx.group].len, r_projs[ctx.group].proj,src);
+            find_action(long_src,ctx.trace_action[i].dst,ctx.trace_action[i].cpy,ctx.group,ctx.trace_action[i].action);
+        }
+
+        free(ctx.trace_action);
+    }
 }
 
 #ifdef HAVE_SYLVAN
@@ -736,7 +775,7 @@ expand_group_next(int group, vset_t set)
         bn_int_t elem_count;
         vset_count(group_tmp[group], NULL, &elem_count);
 
-        if (bn_int2double(&elem_count) >= 10000.0) {
+        if (bn_int2double(&elem_count) >= 10000.0 * SPEC_REL_PERF) {
             size_t size = 40;
             char s[size];
             bn_int2string(s, size, &elem_count);
@@ -1386,6 +1425,23 @@ learn_guards(vset_t states, long *guard_count) {
 }
 
 static void
+reach_chain_stop() {
+    if (!no_exit && ErrorActions > 0) {
+        Warning(info, "Exiting now");
+        HREabort(LTSMIN_EXIT_COUNTER_EXAMPLE);
+    }
+}
+
+static void
+reach_stop(struct reach_s* node) {
+    if (node->unsound_group > -1) {
+        Warning(info, "Condition in group %d does not always evaluate to true or false", node->unsound_group);
+        HREabort(LTSMIN_EXIT_UNSOUND);
+    }
+    reach_chain_stop();
+}
+
+static void
 reach_bfs_prev(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
                    long *eg_count, long *next_count, long *guard_count)
 {
@@ -1431,9 +1487,7 @@ reach_bfs_prev(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
                 // set class and call next function
                 root->class = c;
                 reach_bfs_next(root, reach_groups, maybe);
-                if (root->unsound_group > -1) {
-                    Abort("Condition in group %d does not always evaluate to true or false", root->unsound_group);
-                }
+                reach_stop(root);
                 if (!no_soundness_check && GBgetUseGuards(model)) {
                     // For the current level the spec is sound.
                     // This means that every maybe is actually false.
@@ -1463,9 +1517,7 @@ reach_bfs_prev(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
             if (root->ancestors != NULL) vset_copy(root->ancestors, current_level);
             // call next function
             reach_bfs_next(root, reach_groups, maybe);
-            if (root->unsound_group > -1) {
-                Abort("Condition in group %d does not always evaluate to true or false", root->unsound_group);
-            }
+            reach_stop(root);
             if (!no_soundness_check && GBgetUseGuards(model)) {
                 // For the current level the spec is sound.
                 // This means that every maybe is actually false.
@@ -1549,9 +1601,7 @@ reach_bfs(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
                 // set class and call next function
                 root->class = c;
                 reach_bfs_next(root, reach_groups, maybe);
-                if (root->unsound_group > -1) {
-                    Abort("Condition in group %d does not always evaluate to true or false", root->unsound_group);
-                }
+                reach_stop(root);
                 if (!no_soundness_check && GBgetUseGuards(model)) {
                     // For the current level the spec is sound.
                     // This means that every maybe is actually false.
@@ -1583,9 +1633,7 @@ reach_bfs(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
             if (root->ancestors != NULL) vset_copy(root->ancestors, visited);
             // call next function
             reach_bfs_next(root, reach_groups, maybe);
-            if (root->unsound_group > -1) {
-                Abort("Condition in group %d does not always evaluate to true or false", root->unsound_group);
-            }
+            reach_stop(root);
             if (!no_soundness_check && GBgetUseGuards(model)) {
                 // For the current level the spec is sound.
                 // This means that every maybe is actually false.
@@ -1870,9 +1918,7 @@ reach_par(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
                 // set class and call next function
                 root->class = c;
                 CALL(reach_par_next, root, reach_groups, maybe);
-                if (root->unsound_group > -1) {
-                    Abort("Condition in group %d does not always evaluate to true or false", root->unsound_group);
-                }
+                reach_stop(root);
                 if (!no_soundness_check && GBgetUseGuards(model)) {
                     // For the current level the spec is sound.
                     // This means that every maybe is actually false.
@@ -1903,9 +1949,7 @@ reach_par(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
             if (root->ancestors != NULL) vset_copy(root->ancestors, visited);
             // call next function
             CALL(reach_par_next, root, reach_groups, maybe);
-            if (root->unsound_group > -1) {
-                Abort("Condition in group %d does not always evaluate to true or false", root->unsound_group);
-            }
+            reach_stop(root);
             if (!no_soundness_check && GBgetUseGuards(model)) {
                 // For the current level the spec is sound.
                 // This means that every maybe is actually false.
@@ -1988,9 +2032,7 @@ reach_par_prev(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
                 // set class and call next function
                 root->class = c;
                 CALL(reach_par_next, root, reach_groups, maybe);
-                if (root->unsound_group > -1) {
-                    Abort("Condition in group %d does not always evaluate to true or false", root->unsound_group);
-                }
+                reach_stop(root);
                 if (!no_soundness_check && GBgetUseGuards(model)) {
                     // For the current level the spec is sound.
                     // This means that every maybe is actually false.
@@ -2019,9 +2061,7 @@ reach_par_prev(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
             if (root->ancestors != NULL) vset_copy(root->ancestors, current_level);
             // call next function
             CALL(reach_par_next, root, reach_groups, maybe);
-            if (root->unsound_group > -1) {
-                Abort("Condition in group %d does not always evaluate to true or false", root->unsound_group);
-            }
+            reach_stop(root);
             if (!no_soundness_check && GBgetUseGuards(model)) {
                 // For the current level the spec is sound.
                 // This means that every maybe is actually false.
@@ -2084,7 +2124,8 @@ learn_guards_reduce(vset_t true_states, int t, long *guard_count, vset_t *guard_
                     // If we have Promela, Java etc. then if we encounter a maybe guard then this is an error.
                     // Because every guard is evaluated in order.
                     if (!vset_is_empty(guard_maybe[guards->guard[g]])) {
-                        Abort("Condition in group %d does not evaluate to true or false", t);
+                        Warning(info, "Condition in group %d does not evaluate to true or false", t);
+                        HREabort(LTSMIN_EXIT_UNSOUND);
                     }
                 } else {
                     // If we have mCRL2 etc., then we need to store all (real) false states and maybe states
@@ -2104,7 +2145,8 @@ learn_guards_reduce(vset_t true_states, int t, long *guard_count, vset_t *guard_
             vset_copy(tmp, maybe_states);
             vset_minus(tmp, false_states);
             if (!vset_is_empty(tmp)) {
-                Abort("Condition in group %d does not evaluate to true or false", t);
+                Warning(info, "Condition in group %d does not evaluate to true or false", t);
+                HREabort(LTSMIN_EXIT_UNSOUND);
             }
             vset_clear(tmp);
             vset_clear(maybe_states);
@@ -2163,6 +2205,7 @@ reach_chain_prev(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
 
             if (!vset_is_empty(new_reduced[i])) {
                 expand_group_next(i, new_reduced[i]);
+                reach_chain_stop();
                 (*eg_count)++;
                 (*next_count)++;
                 vset_next(temp, new_reduced[i], group_next[i]);
@@ -2246,6 +2289,7 @@ reach_chain(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
             vset_copy(new_reduced[i], visited);
             learn_guards_reduce(new_reduced[i], i, guard_count, guard_maybe, false_states, maybe_states, tmp);
             expand_group_next(i, new_reduced[i]);
+            reach_chain_stop();
             (*eg_count)++;
             (*next_count)++;
             vset_next(temp, new_reduced[i], group_next[i]);
@@ -2315,6 +2359,7 @@ reach_sat_fix(reach_proc_t reach_proc, vset_t visited,
         for(int i = 0; i < nGrps; i++){
             if (!bitvector_is_set(reach_groups, i)) continue;
             expand_group_next(i, visited);
+            reach_chain_stop();
             (*eg_count)++;
         }
         if (dlk_detect) vset_copy(deadlocks, visited);
@@ -2922,6 +2967,7 @@ init_model(char *file)
     ltstype = GBgetLTStype(model);
     N = lts_type_get_state_length(ltstype);
     eLbls = lts_type_get_edge_label_count(ltstype);
+    sLbls = dm_nrows(GBgetStateLabelInfo(model));
     nGrps = dm_nrows(GBgetDMInfo(model));
     max_sat_levels = (N / sat_granularity) + 1;
     if (GBhasGuardsInfo(model)) {
@@ -3359,7 +3405,6 @@ parity_game* compute_symbolic_parity_game(vset_t visited, int* src)
 }
 
 static char *files[2];
-hre_context_t ctx;
 
 
 #ifdef HAVE_SYLVAN
@@ -3397,16 +3442,16 @@ void init_multi_process(size_t workers)
 }
 
 static int
-master_get_transitions_short(model_t model, int group, int* src, TransitionCB cb, void* context)
+master_get_transitions(model_t model, int group, int* src, TransitionCB cb, void* context, int r_length, int w_length, enum MULTI_PROC_GB_CALL type)
 {
     // get my lace thread id
     int id = lace_get_worker()->worker + 1;
 
-    int r_length = r_projs[group].len;
     Print(hre_debug, "master %d: writing state to slave (group=%d, length=%d).", id, group, r_length);
     //stream_t os = fd_output(parent_sockets[id-1]);
     stream_t os = parent_socket_os[id-1];
     DSwriteS32(os, TRANSITION); // signal that a state will be sent next
+    DSwriteS32(os, type); // signal short or long
     DSwriteS32(os, group);
     for(int i=0; i<r_length; i++)
     {
@@ -3416,12 +3461,11 @@ master_get_transitions_short(model_t model, int group, int* src, TransitionCB cb
 
     //stream_t is = fd_input(parent_sockets[id-1]);
     stream_t is = parent_socket_is[id-1];
-    int w_length = w_projs[group].len;
     int labels = lts_type_get_edge_label_count(GBgetLTStype(model));
 
     Debug("master %d: waiting for reply.", id);
-    int next = DSreadS32(is);
-    while(next!=NOOP)
+    enum MULTI_PROC_GB_CALL next = DSreadS32(is);
+    while(next==TRANSITION)
     {
         Print(hre_debug, "master %d: reading state from slave.", id);
         int dst[w_length];
@@ -3463,17 +3507,29 @@ master_get_transitions_short(model_t model, int group, int* src, TransitionCB cb
 }
 
 static int
-master_get_label_short(model_t model,int label,int *state)
+master_get_transitions_short(model_t model, int group, int* src, TransitionCB cb, void* context)
+{
+    return master_get_transitions(model, group, src, cb, context, r_projs[group].len, w_projs[group].len, SHORT);
+}
+
+static int
+master_get_transitions_long(model_t model, int group, int* src, TransitionCB cb, void* context)
+{
+    return master_get_transitions(model, group, src, cb, context, N, N, LONG);
+}
+
+static int
+master_get_label(model_t model,int label,int *state, int p_length, enum MULTI_PROC_GB_CALL type)
 {
     (void) model;
     // get my lace thread id
     int id = lace_get_worker()->worker + 1;
 
-    int p_length = g_projs[label].len;
     Print(hre_debug, "master %d: writing state to slave (label=%d, length=%d).", id, label, p_length);
     //stream_t os = fd_output(parent_sockets[id-1]);
     stream_t os = parent_socket_os[id-1];
     DSwriteS32(os, LABEL); // signal that a state will be sent next
+    DSwriteS32(os, type); // signal short or long
     DSwriteS32(os, label);
     for(int i=0; i<p_length; i++)
     {
@@ -3492,6 +3548,18 @@ master_get_label_short(model_t model,int label,int *state)
     return result;
 }
 
+static int
+master_get_label_short(model_t model,int label,int *state)
+{
+    return master_get_label(model, label, state, g_projs[label].len, SHORT);
+}
+
+static int
+master_get_label_long(model_t model,int label,int *state)
+{
+    return master_get_label(model, label, state, N, LONG);
+}
+
 static void
 master_exit()
 {
@@ -3507,14 +3575,13 @@ master_exit()
 }
 
 static void
-slave_transition_cb(void* context, transition_info_t* ti, int* dst, int* cpy)
+slave_transition_cb(void* context, transition_info_t* ti, int* dst, int* cpy, int length)
 {
     int id = HREme(HREglobal());
     Debug("slave_transition_cb %d.", id);
     //stream_t os = fd_output(child_sockets[id-1]);
     stream_t os = child_socket_os[id-1];
     int group = ti->group;
-    int length = w_projs[group].len;
     int labels = lts_type_get_edge_label_count(GBgetLTStype(model));
     Print(hre_debug, "slave_transition_cb %d: writing state to master: group=%d, length=%d.", id, group, length);
 
@@ -3543,6 +3610,18 @@ slave_transition_cb(void* context, transition_info_t* ti, int* dst, int* cpy)
 }
 
 static void
+slave_transition_cb_short(void* context, transition_info_t* ti, int* dst, int* cpy)
+{
+    slave_transition_cb(context, ti, dst, cpy, w_projs[ti->group].len);
+}
+
+static void
+slave_transition_cb_long(void* context, transition_info_t* ti, int* dst, int* cpy)
+{
+    slave_transition_cb(context, ti, dst, cpy, N);
+}
+
+static void
 start_slave()
 {
     init_model(files[0]);
@@ -3555,22 +3634,28 @@ start_slave()
     Print(infoLong, "slave %d: ready.", id);
     //stream_t is = fd_input(child_sockets[id-1]);
     stream_t is = child_socket_is[id-1];
-    int next = DSreadS32(is);
+    enum MULTI_PROC_GB_CALL next = DSreadS32(is);
     while (next!=NOOP)
     {
+        enum MULTI_PROC_GB_CALL type = DSreadS32(is);
+        Print(hre_debug,"slave %d: making %s GB call", id, type == SHORT ? "short" : "long");
+
         if (next == TRANSITION) {
             Print(hre_debug, "slave %d: start reading transition.", id);
             int group = DSreadS32(is);
-            int length = r_projs[group].len;
+            int length = type == SHORT ? r_projs[group].len : N;
             int src[length];
             for(int i=0; i < length; i++)
             {
                 src[i] = DSreadS32(is);
             }
             Print(hre_debug, "slave %d: received state (group=%d, length=%d).", id, group, length);
-            (*transitions_short_multi)(model, group, src, slave_transition_cb, NULL);
+            if (type == SHORT) {
+                (*transitions_short_multi)(model, group, src, slave_transition_cb_short, NULL);
+            } else { // type == LONG
+                (*transitions_long_multi)(model, group, src, slave_transition_cb_long, NULL);
+            }
             Debug("slave %d: returned from greybox (group=%d).", id, group);
-
             //stream_t os = fd_output(child_sockets[id-1]);
             stream_t os = child_socket_os[id-1];
             DSwriteS32(os, NOOP); // signal that all successor states have been sent
@@ -3580,14 +3665,19 @@ start_slave()
         } else if (next == LABEL) {
             Print(hre_debug, "slave %d: start reading label.", id);
             int label = DSreadS32(is);
-            int length = g_projs[label].len;
+            int length = type == SHORT ? g_projs[label].len : N;
             int src[length];
             for(int i=0; i < length; i++)
             {
                 src[i] = DSreadS32(is);
             }
             Print(hre_debug, "slave %d: received state (label=%d, length=%d).", id, label, length);
-            int res = (*label_short_multi)(model, label, src);
+            int res;
+            if (type == SHORT) {
+                res = (*label_short_multi)(model, label, src);
+            } else { // type == lONG
+                res = (*label_long_multi)(model, label, src);
+            }
             Debug("slave %d: returned from greybox (label=%d, result=%d).", id, label, res);
             //stream_t os = fd_output(child_sockets[id-1]);
             stream_t os = child_socket_os[id-1];
@@ -3692,8 +3782,10 @@ actual_main(void)
             *transitions_short = GBgetTransitionsShort;
             Print(infoShort, "Using GBgetTransitionsShort as next-state function");
         }
+        *transitions_long = GBgetTransitionsLong;
 
         *label_short = GBgetStateLabelShort;
+        *label_long = GBgetStateLabelLong;
 
         if (GBgetUseGuards(model)) {
             if (no_soundness_check) {
@@ -3705,8 +3797,12 @@ actual_main(void)
         if (multi_process) {
             *transitions_short_multi = *transitions_short;
             *transitions_short = master_get_transitions_short;
+            *transitions_long_multi = *transitions_long;
+            *transitions_long = master_get_transitions_long;
             *label_short_multi = *label_short;
-            *label_short = *master_get_label_short;
+            *label_short = master_get_label_short;
+            *label_long_multi = *label_long;
+            *label_long = master_get_label_long;
         }
 #endif
 
@@ -4019,21 +4115,33 @@ main (int argc, char *argv[])
     if (multi_process) {
         init_multi_process(n_workers);
     }
-    transitions_short = mmap(NULL,sizeof(transitions_short_t),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANON,0,0);
-    transitions_short_multi = mmap(NULL,sizeof(transitions_short_t),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANON,0,0);
+    transitions_short = mmap(NULL,sizeof(transitions_t),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANON,0,0);
+    transitions_short_multi = mmap(NULL,sizeof(transitions_t),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANON,0,0);
     *(transitions_short) = NULL;
     *(transitions_short_multi) = NULL;
+    transitions_long = mmap(NULL,sizeof(transitions_t),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANON,0,0);
+    transitions_long_multi = mmap(NULL,sizeof(transitions_t),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANON,0,0);
+    *(transitions_long) = NULL;
+    *(transitions_long_multi) = NULL;
 
-    label_short = mmap(NULL,sizeof(label_short_t),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANON,0,0);
-    label_short_multi = mmap(NULL,sizeof(label_short_t),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANON,0,0);
+    label_short = mmap(NULL,sizeof(label_t),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANON,0,0);
+    label_short_multi = mmap(NULL,sizeof(label_t),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANON,0,0);
     *(label_short) = NULL;
     *(label_short_multi) = NULL;
+    label_long = mmap(NULL,sizeof(label_t),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANON,0,0);
+    label_long_multi = mmap(NULL,sizeof(label_t),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANON,0,0);
+    *(label_long) = NULL;
+    *(label_long_multi) = NULL;
 
 #else
-    transitions_short = RTmalloc(sizeof(transitions_short_t));
+    transitions_short = RTmalloc(sizeof(transitions_t));
     *(transitions_short) = NULL;
-    label_short = RTmalloc(sizeof(label_short_t));
+    transitions_long = RTmalloc(sizeof(transitions_t));
+    *(transitions_long) = NULL;
+    label_short = RTmalloc(sizeof(label_t));
     *(label_short) = NULL;
+    label_long = RTmalloc(sizeof(label_t));
+    *(label_long) = NULL;
 #endif
 
     HREinitStart(&argc,&argv,1,2,files,"<model> [<etf>]");
