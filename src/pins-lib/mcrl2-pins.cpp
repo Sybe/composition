@@ -635,7 +635,7 @@ MCRL2loadGreyboxModel (model_t m, const char *model_name)
     GBsetTransitionInGroup(m, MCRL2transitionInGroup);
     GBsetPrettyPrint(m, MCRL2prettyPrint);
 
-    atexit(MCRL2exit);
+//    atexit(MCRL2exit);
 }
 
 }

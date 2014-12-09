@@ -207,6 +207,12 @@ static void write_chunk_tables(lts_file_t file){
         case LTStypeChunk:
         case LTStypeEnum:
             if (values==NULL || VTgetCount(values)==0) {
+                if(values==NULL){
+                    Print(error, "values is null");
+                }
+                if(VTgetCount(values)==0){
+                    Print(error, "vtgetcount is 0");
+                }
                 Print(error,"table for type %s is missing or empty",type_name);
                 Print(error,"change format for %s to direct",type_name);
                 lts_type_set_format(ltstype,i,LTStypeDirect);

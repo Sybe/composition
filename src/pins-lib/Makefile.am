@@ -71,6 +71,7 @@ libpins_la_SOURCES += pins2pins-mucalc.c pins2pins-mucalc.h
 libpins_la_SOURCES += pins2pins-ltl.c
 libpins_la_SOURCES += pins2pins-por.h
 libpins_la_SOURCES += pins2pins-por.c
+libpins_la_SOURCES += pins2pins-parallel.c
 libpins_la_SOURCES += pins2pins-por-check.c
 libpins_la_SOURCES += property-semantics.c property-semantics.h
 libpins_la_CPPFLAGS = -DNXT $(AM_CPPFLAGS) -I${top_srcdir}/ltl2ba

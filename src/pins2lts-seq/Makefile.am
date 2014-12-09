@@ -19,6 +19,7 @@ endif
 
 if HAVE_LIBMCRL2
 bin_PROGRAMS += lps2lts-seq
+bin_PROGRAMS += lpslps2lts-seq
 endif
 
 if HAVE_LIBPBES
@@ -68,6 +69,14 @@ lps2lts_seq_LDADD    += $(VSET_LIBS) ../pins-lib/libmcrl2-pins.la
 lps2lts_seq_CPPFLAGS  = -DMCRL2 $(SEQ_CPPFLAGS)
 lps2lts_seq_LDFLAGS   = $(MCRL2_LDFLAGS) $(AM_LDFLAGS)
 nodist_EXTRA_lps2lts_seq_SOURCES = automake-force-linker.cxx #req. by mcrl2s
+
+# lpslps2lts-seq
+lpslps2lts_seq_SOURCES   = pinspins2lts-seq.c
+lpslps2lts_seq_LDADD     = $(HRE_LIB) $(PINS_LIBS)
+lpslps2lts_seq_LDADD    += $(VSET_LIBS) ../pins-lib/libmcrl2-pins.la
+lpslps2lts_seq_CPPFLAGS  = -DMCRL2 $(SEQ_CPPFLAGS)
+lpslps2lts_seq_LDFLAGS   = $(MCRL2_LDFLAGS) $(AM_LDFLAGS)
+nodist_EXTRA_lpslps2lts_seq_SOURCES = automake-force-linker.cxx #req. by mcrl2s
 
 # pbes2lts-seq
 pbes2lts_seq_SOURCES   = pins2lts-seq.c
