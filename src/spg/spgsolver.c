@@ -36,13 +36,15 @@ static  struct poptOption options[] = {
     POPT_TABLEEND
 };
 
+static int file_count;
+
 int
 main (int argc, char *argv[])
 {
     char *files[1];
     HREinitBegin(argv[0]);
     HREaddOptions(options,"Symbolic parity game solver. Solves <game>.\n");
-    HREinitStart(&argc,&argv,1,1,files,"<game>");
+    HREinitStart(&argc,&argv,1,1,files,&file_count,"<game>");
 
 #ifdef HAVE_SYLVAN
     if (vset_default_domain==VSET_Sylvan || vset_default_domain==VSET_LDDmc) {

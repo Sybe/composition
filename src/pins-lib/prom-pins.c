@@ -277,12 +277,15 @@ PromLoadGreyboxModel(model_t model, const char *filename)
 
     // assume sequential use (preLoader may not have been called):
     if (NULL == dlHandle) {
+        printf("Entered if");
         char *extension = strrchr (filename, '.');
         HREassert (extension != NULL, "No filename extension in %s", filename);
         if (0==strcmp (extension, ".spins")) {
             PromLoadDynamicLib (model, filename);
         } else {
+            printf("Compiling...\n");
             PromCompileGreyboxModel(model, filename);
+            printf("Compiled...\n");
         }
     }
 
@@ -545,4 +548,6 @@ PromLoadGreyboxModel(model_t model, const char *filename)
         }
         GBsetGuardNDSInfo(model, gnds_info);
     }
+
+    dlHandle = NULL;
 }

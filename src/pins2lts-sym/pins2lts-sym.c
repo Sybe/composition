@@ -2939,9 +2939,11 @@ directed(sat_proc_t sat_proc, reach_proc_t reach_proc, vset_t visited,
 }
 
 static void
-init_model(char *file)
+init_model(char **files, int file_count)
 {
-    Warning(info, "opening %s", file);
+    for (int i = 0; i < file_count; i++) {
+        Warning(info, "opening %s", files[i]);
+    }
     model = GBcreateBase();
     GBsetChunkMethods(model,HREgreyboxNewmap,HREglobal(),
                       HREgreyboxI2C,
@@ -2951,7 +2953,7 @@ init_model(char *file)
 
     HREbarrier(HREglobal());
 
-    GBloadFile(model, file, &model);
+    GBloadFiles(model, files, file_count, &model);
 
     HREbarrier(HREglobal());
 
@@ -3404,7 +3406,8 @@ parity_game* compute_symbolic_parity_game(vset_t visited, int* src)
     return g;
 }
 
-static char *files[2];
+static char *files[10];
+int file_count;
 
 
 #ifdef HAVE_SYLVAN
@@ -3624,7 +3627,7 @@ slave_transition_cb_long(void* context, transition_info_t* ti, int* dst, int* cp
 static void
 start_slave()
 {
-    init_model(files[0]);
+    init_model(files, file_count);
 
     init_domain(VSET_IMPL_AUTOSELECT);
 
@@ -3722,7 +3725,7 @@ actual_main(void)
     int *src;
     vset_t initial;
 
-    init_model(files[0]);
+    init_model(files, file_count);
 
     Print(infoLong, "Master ready: %d.", HREme(HREglobal()));
     //for(int i=0; i < HREpeers(HREglobal()); i++)
@@ -4035,10 +4038,10 @@ actual_main(void)
             Print(infoLong, "guard_true: %ld nodes total", total_true);
         }
     }
-
-    if (files[1] != NULL)
-        do_output(files[1], visited);
-
+    Warning(info, "Comparison result: %d", strcmp(strrchr(files[0], '.'), strrchr(files[file_count - 1], '.')));
+    if (file_count > 1 && (0 != strcmp(strrchr(files[0], '.'), strrchr(files[file_count - 1], '.')))){
+        do_output(files[file_count - 1], visited);
+    }
     if (spg) { // converting the LTS to a symbolic parity game, save and solve.
         vset_destroy(true_states);
         vset_destroy(false_states);
@@ -4144,7 +4147,7 @@ main (int argc, char *argv[])
     *(label_long) = NULL;
 #endif
 
-    HREinitStart(&argc,&argv,1,2,files,"<model> [<etf>]");
+    HREinitStart(&argc,&argv,1,10,files, &file_count, "<model> [<etf>]");
 
 #ifdef HAVE_SYLVAN
     lace_n_workers = n_workers;

@@ -10,307 +10,319 @@
 
 #include <hre/user.h>
 #include <pins-lib/pins.h>
-#include <util-lib/dynamic-array.h>
-#include <hre/stringindex.h>
 
-//static const int EL_OFFSET = 1;
-static model_t model1;
-//struct state_info {
-//    int first;
-//    int trans;
-//    int edges;
-//};
-/**
-static void init_state_info(void*arg,void*old_array,int old_size,void*new_array,int new_size){
-    (void)arg;(void)old_array;
-    struct state_info*array=(struct state_info*)new_array;
-    while(old_size<new_size){
-        array[old_size].first=-1;
-        old_size++;
+
+static int model_choice;
+static int *global_source;
+static TransitionCB callb;
+static model_t *models;
+static int model_count;
+typedef matrix_t* (*matrixCall)(model_t model);
+
+
+void
+combineMatrices(matrixCall mc, model_t *models, matrix_t *dst){
+    int columns[model_count];
+    int rows[model_count];
+    int columns_total = 0;
+    int rows_total = 0;
+    for(int i = 0; i < model_count; i++){
+        columns[i]      = dm_ncols(mc(models[i]));
+        rows[i]         = dm_nrows(mc(models[i]));
+        columns_total   += columns[i];
+        rows_total      += rows[i];
     }
+     dm_create(dst, rows_total, columns_total);
+     int cols_created = 0;
+     int rows_created = 0;
+     for(int i = 0; i < model_count; i++){
+         for(int j = 0; j < rows[i]; j++){
+             for(int k = 0; k < columns[i]; k++){
+                 if(dm_is_set(mc(models[i]), j, k)){
+                     dm_set(dst, j + rows_created, k + cols_created);
+                 }
+             }
+         }
+         cols_created += columns[i];
+         rows_created += rows[i];
+     }
 }
 
-struct group_cache {
-    int                 len;
-    int                 r_len;
-    int                 w_len;
-    string_index_t      idx;
-//    int                 explored;
-    int                 source;
-    int                 edges;
-    array_manager_t     begin_man;
-    struct state_info*  begin;
-    array_manager_t     dest_man;
-    int                 Nedge_labels;
-    int                *dest;
-     Data layout:
-     * dest[begin[i]]...dest[begin[i+1]-1]: successor info for state i
-     * k := Nedge_labels
-     * transitions i --l_x1,...,l_xk--> j_x
-     * dest[begin[i]+x*(EL_OFFSET+k)]   := j_x
-     * dest[begin[i]+x*(EL_OFFSET+k)+1] := l_x1
-     * ...
-     * dest[begin[i]+x*(EL_OFFSET+k)+k] := l_xk
-     */
-
-    /* int len; */
-    /* TransitionCB cb; */
-    /* void*user_context; */
-/**
-};
-
-struct cache_context {
-    struct group_cache *cache;
-};
-*
-static inline int
-edge_info_sz (struct group_cache *cache)
-{
-    return EL_OFFSET + cache->Nedge_labels;
-}
-*/
-/**
-static void
-add_cache_entry (void *context, transition_info_t *ti, int *dst, int *cpy)
-{
-    struct group_cache *ctx = (struct group_cache *)context;
-    int                 dst_index =
-        SIputC (ctx->idx, (char *)dst, ctx->len);
-
-    int offset=ctx->begin[ctx->source].first+ctx->begin[ctx->source].edges*edge_info_sz(ctx);
-    ensure_access (ctx->dest_man,offset+edge_info_sz(ctx));
-
-    int *pe_info = &ctx->dest[offset];
-    *pe_info = dst_index;
-    if (ti->labels != NULL)
-        memcpy(pe_info + EL_OFFSET, ti->labels, ctx->Nedge_labels * sizeof *pe_info);
-
-    ctx->edges++;
-    ctx->begin[ctx->source].edges++;
-
-    return;
-    (void)cpy;
-}
-*/
-/**
-static int
-cached_short (model_t self, int group, int *src, TransitionCB cb,
-              void *user_context, int (*short_proc)(model_t,int,int*,TransitionCB,void*))
-{
-    struct cache_context *ctx =
-        (struct cache_context *)GBgetContext (self);
-    struct group_cache *cache = &(ctx->cache[group]);
-    int len = dm_ones_in_row(GBgetDMInfo(self), group);
-
-    int                 dst[len];
-    int                 src_idx =
-        SIputC (cache->idx, (char *)src, cache->len);
-
-    ensure_access(cache->begin_man,src_idx);
-    if (cache->begin[src_idx].first==-1) {
-            cache->source=src_idx;
-            cache->begin[src_idx].first = cache->edges * edge_info_sz (cache);
-            cache->begin[cache->source].edges=0;
-            cache->begin[src_idx].trans = short_proc (GBgetParent(self), group, src, add_cache_entry, cache);
+//Eigen callback functie
+static void parralel_cb (void*context,transition_info_t*transition_info,int*dst,int*cpy){
+//    Warning(info, "Callback");
+    int columns[model_count];
+    int columns_total = 0;
+    for(int i = 0 ; i < model_count; i++){
+        columns[i] = lts_type_get_state_length(GBgetLTStype(models[i]));
+        columns_total += columns[i];
     }
-    int N=cache->begin[src_idx].edges;
-    for (int i = cache->begin[src_idx].first ; N>0 ; N--,i += edge_info_sz (cache)) {
-        // MW: remove if edge label becomes "const int *"?
-        memcpy (dst, SIgetC (cache->idx, cache->dest[i], NULL),
-                cache->len);
-        int *labels = cache->Nedge_labels == 0 ? NULL : &(cache->dest[i+EL_OFFSET]);
-        transition_info_t cbti = GB_TI(labels, group);
-        cb (user_context, &cbti, dst, NULL);
+    int dest[columns_total];
+    int cols_counted = 0;
+    for(int i = 0; i < model_count; i++){
+        if(model_choice == i){
+            for(int j = 0; j < columns[i]; j++){
+                dest[j + cols_counted]=dst[j];
+            }
+        } else {
+            for(int j = 0; j < columns[i]; j++){
+                dest[j + cols_counted] = global_source[j + cols_counted];
+            }
+        }
+        cols_counted += columns[i];
     }
-    return cache->begin[src_idx].trans;
-}
-*/
-/**
-static int
-cached_next_short (model_t self, int group, int *src, TransitionCB cb,
-                   void *user_context) {
-    return cached_short(self, group, src, cb, user_context, &GBgetTransitionsShort);
-}
-
-static int
-cached_actions_short (model_t self, int group, int *src, TransitionCB cb,
-                   void *user_context) {
-    return cached_short(self, group, src, cb, user_context, &GBgetActionsShort);
-}
-
-static int
-cached_transition_in_group (model_t self, int* labels, int group)
-{
-  return GBtransitionInGroup(GBgetParent(self), labels, group);
-}
-*/
-int
-getTransitionsShort (model_t m, int group, int src, TransitionCB cb, void *ctx)
-{
-    return GBgetTransitionsShort(model1, group, src, cb, ctx);
+    callb(context, transition_info, dest, cpy);
 }
 
 int
-getTransitionsLong (model_t m, int group, int src, TransitionCB cb, void *ctx)
+getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
 {
-    return GBgetTransitionsLong(model1, group, src, cb, ctx);
+//    Warning(info, "NextState Call");
+    global_source = src;
+    callb = cb;
+    int result;
+    int groups[model_count];
+    int state_vars[model_count];
+    for(int i = 0; i < model_count; i++){
+        groups[i] = dm_nrows(GBgetDMInfo(models[i]));
+        state_vars[i] = lts_type_get_state_length (GBgetLTStype(models[i]));
+    }
+    int groups_counted = 0;
+    int state_vars_counted = 0;
+    int group_found = 0;
+    for(int i = 0; i < model_count && !group_found; i++){
+        if(group < groups[i] + groups_counted && group >= groups_counted){
+            model_choice = i;
+            int source[state_vars[i]];
+
+            for(int j = 0; j < state_vars[i]; j++){
+                source[j] = src[j + state_vars_counted];
+//                Warning(info, "%d", source[j]);
+            }
+            result = GBgetTransitionsLong(models[i], group - groups_counted, source, parralel_cb, ctx);
+            group_found = 1;
+//            Warning(info, "Model:%d", i);
+        }
+        groups_counted += groups[i];
+        state_vars_counted += state_vars[i];
+    }
+ //   Warning(info, "Result:%d", result);
+    return result;
+}
+
+int
+getStateLabelLong(model_t m, int label, int *state){
+    Warning(info, "State Label call");
+    int labels[model_count];
+    int state_vars[model_count];
+    for(int i = 0; i<model_count; i++){
+        labels[i] = lts_type_get_state_label_count(GBgetLTStype(models[i]));
+        state_vars[i] = lts_type_get_state_length (GBgetLTStype(models[i]));
+    }
+    int labels_counted = 0;
+    int state_vars_counted = 0;
+    int model_found = 0;
+    int result;
+    for(int i = 0; i < model_count && !model_found; i++){
+        if(label < labels[i] + labels_counted && label >= labels_counted){
+            model_found = 1;
+            int local_state[state_vars[i]];
+            for(int j = 0; j < state_vars[i]; j++){
+                local_state[j] = state[j + state_vars_counted];
+            }
+            result = GBgetStateLabelLong(models[i], label - labels_counted, local_state);
+        }
+        labels_counted += labels[i];
+        state_vars_counted += state_vars[i];
+    }
+
+    return result;
+}
+
+int
+transitionInGroup(model_t m, int* labels, int group){
+    int groups[model_count];
+    int label_count[model_count];
+    for(int i = 0; i < model_count; i++){
+        groups[i] = dm_nrows(GBgetDMInfo(models[i]));
+        label_count[i] = lts_type_get_edge_label_count(GBgetLTStype(models[i]));
+    }
+    int result = 0;
+    int groups_counted = 0;
+    int label_count_counted = 0;
+    for(int i = 0; i < model_count; i++){
+        if(group < groups[i] + groups_counted && group >= groups_counted){
+            int labels_in_model[label_count[i]];
+            for(int j = 0; j < label_count[i]; j++){
+                labels_in_model[j] = labels[j + label_count_counted];
+            }
+            result = GBtransitionInGroup(models[i], labels_in_model, group - groups_counted);
+        }
+        groups_counted += groups[i];
+        label_count_counted += label_count[i];
+    }
+    return result;
+}
+
+int
+matrices_present(matrixCall mc, model_t *models){
+    int result = 1;
+    for(int i = 0; i < model_count; i++){
+        result = result && (mc(models[i]) != NULL);
+    }
+    return result;
 }
 
 void
-make_guards(int **guard1, int **guard2, int **guards){
-    long len1 = sizeof(guard1) / sizeof(guard1[0]);
-    for (int i = 0; i < len1; i++){
-        guards[i] = guard1[i];
-    }
-    long len2 = sizeof(guard2) / sizeof(guard2[0]);
-    for (int i = 0; i < len2; i++){
-        guards[len1 + i] = guard2[i];
-    }
-}
-
-
-void
-make_state(int s1[], int s2[], int state[], int len1, int len2)
+GBparallelCompose (model_t composition, char **files, int file_count, pins_loader_t loader)
 {
-    for(int i = 0; i < len1; i++){
-        state[i] = s1[i];
+
+    Warning(info, "Initializing awesome parallel composition layer");
+    model_count = file_count;
+    models = malloc(file_count*sizeof(model_t));
+    for(int i = 0; i < file_count; i++){
+        Warning(info, "Creating base");
+        models[i] = GBcreateBase();
+        Warning(info, "Setting chunk methods");
+        GBsetChunkMethods(models[i],HREgreyboxNewmap,HREglobal(),
+                          HREgreyboxI2C,
+                          HREgreyboxC2I,
+                          HREgreyboxCAtI,
+                          HREgreyboxCount);
+        Warning(info, "Starting loader");
+        loader(models[i], files[i]);
+        Warning(info, "Loader finished");
     }
-    for(int i = 0; i < len2; i++){
-        state[i + len1] = s2[i];
-    }
-}
+    Warning(info, "Models to compose:%d",file_count);
 
-void
-GBparallelCompose (model_t m1, model_t model2, model_t composition)
-{
-    model1 = m1;
-    HREassert (model1 != NULL, "No model 1");
-    HREassert (model2 != NULL, "No model 2");
+    matrix_t *p_dm              = RTmalloc(sizeof(matrix_t));
+    matrix_t *p_dm_read         = RTmalloc(sizeof(matrix_t));
+    matrix_t *p_dm_may_write    = RTmalloc(sizeof(matrix_t));
+    matrix_t *p_dm_must_write   = RTmalloc(sizeof(matrix_t));
+    matrix_t *p_dm_expand       = RTmalloc(sizeof(matrix_t));
+    matrix_t *p_dm_project      = RTmalloc(sizeof(matrix_t));
+    matrix_t *p_dm_state_label  = RTmalloc(sizeof(matrix_t));
+    matrix_t *p_dm_commute      = RTmalloc(sizeof(matrix_t));
+    matrix_t *p_dm_NDS          = RTmalloc(sizeof(matrix_t));
+    matrix_t *p_dm_NES          = RTmalloc(sizeof(matrix_t));
 
-    matrix_t *p_dm = RTmalloc(sizeof(matrix_t));
-    matrix_t *p_dm_read = RTmalloc(sizeof(matrix_t));
-    matrix_t *p_dm_may_write = RTmalloc(sizeof(matrix_t));
-    matrix_t *p_dm_must_write = RTmalloc(sizeof(matrix_t));
-    matrix_t *p_dm_expand = RTmalloc(sizeof(matrix_t));
-    matrix_t *p_dm_project = RTmalloc(sizeof(matrix_t));
-
-//    int columns     = dm_ncols(GBgetDMInfo(model1));// + dm_ncols(GBgetDMInfo(model2));
-//    int rows        = dm_nrows(GBgetDMInfo(model1));// + dm_nrows(GBgetDMInfo(model2));
-//    Warning (info, "Rows %d", rows);
-//    Warning (info, "Columns %d", columns);
-//    dm_create(p_dm, rows, columns);
-    p_dm = GBgetDMInfo(model1);
-    if(GBgetDMInfo(model1) != NULL){
+    if(matrices_present(GBgetDMInfo, models)){
+        combineMatrices(GBgetDMInfo, models, p_dm);
         GBsetDMInfo(composition, p_dm);
     }
-
-    p_dm_read  = GBgetDMInfoRead(model1);;
-//    int columns_read     = dm_ncols(GBgetDMInfoRead(model1)) + dm_ncols(GBgetDMInfoRead(model2));
-//    int rows_read        = dm_nrows(GBgetDMInfoRead(model1)) + dm_nrows(GBgetDMInfoRead(model2));
-//   dm_create(p_dm_read, rows_read, columns_read);
-    if(GBgetDMInfoRead(model1) != NULL){
+    if(matrices_present(GBgetDMInfoRead, models)){
+        combineMatrices(GBgetDMInfoRead, models, p_dm_read);
         GBsetDMInfoRead(composition, p_dm_read);
     }
-    p_dm_may_write  = GBgetDMInfoMayWrite(model1);
-//    int columns_may_write     = dm_ncols(GBgetDMInfoMayWrite(model1)) + dm_ncols(GBgetDMInfoMayWrite(model2));
-//    int rows_may_write        = dm_nrows(GBgetDMInfoMayWrite(model1)) + dm_nrows(GBgetDMInfoMayWrite(model2));
-//    dm_create(p_dm_may_write, rows_may_write, columns_may_write);
-    if(GBgetDMInfoMayWrite(model1) != NULL){
+
+    if(matrices_present(GBgetDMInfoMayWrite, models)){
+        combineMatrices(GBgetDMInfoMayWrite, models, p_dm_may_write);
         GBsetDMInfoMayWrite(composition, p_dm_may_write);
     }
-    p_dm_must_write = GBgetDMInfoMustWrite(model1);
-//    int columns_must_write     = dm_ncols(GBgetDMInfoMustWrite(model1)) + dm_ncols(GBgetDMInfoMustWrite(model2));
-//    int rows_must_write        = dm_nrows(GBgetDMInfoMustWrite(model1)) + dm_nrows(GBgetDMInfoMustWrite(model2));
-//    dm_create(p_dm_must_write, rows_must_write, columns_must_write);
-    if(GBgetDMInfoMustWrite(model1) != NULL){
+    if(matrices_present(GBgetDMInfoMustWrite, models)){
+        combineMatrices(GBgetDMInfoMustWrite, models, p_dm_must_write);
         GBsetDMInfoMustWrite(composition, p_dm_must_write);
     }
-    p_dm_expand     = GBgetExpandMatrix(model1);
-//    int columns_expand        = dm_ncols(GBgetExpandMatrix(model1)) + dm_ncols(GBgetExpandMatrix(model2));
-//    int rows_expand           = dm_nrows(GBgetExpandMatrix(model1)) + dm_nrows(GBgetExpandMatrix(model2));
-//    dm_create(p_dm_expand, rows_expand, columns_expand);
-    if(GBgetExpandMatrix(model1) != NULL){
+    if(matrices_present(GBgetExpandMatrix, models)){
+        combineMatrices(GBgetExpandMatrix, models, p_dm_expand);
         GBsetExpandMatrix(composition, p_dm_expand);
     }
-    p_dm_project    = GBgetProjectMatrix(model1);
-//    int columns_project       = dm_ncols(GBgetProjectMatrix(model1)) + dm_ncols(GBgetProjectMatrix(model2));
-//    int rows_project          = dm_nrows(GBgetProjectMatrix(model1)) + dm_nrows(GBgetProjectMatrix(model2));
-//    dm_create(p_dm_project, rows_project, columns_project);
-    if(GBgetProjectMatrix(model1) != NULL){
+    if(matrices_present(GBgetProjectMatrix, models)){
+        combineMatrices(GBgetProjectMatrix, models, p_dm_project);
         GBsetProjectMatrix(composition, p_dm_project);
     }
-
-    Warning (info, "LTS type set");
-    GBsetLTStype(composition, GBgetLTStype(model1));
-    Warning (info, "LTS type was set");
-
-    int len1 = lts_type_get_state_length (GBgetLTStype (model1));
-    int len2 = lts_type_get_state_length (GBgetLTStype (model2));
-    int len  = len1 + len2;
-    int s0_0[len1];
-    int s0_1[len2];
-    GBgetInitialState (model1, s0_0);
-    GBgetInitialState (model2, s0_1);
-    int s0[len];
-    make_state(s0_0, s0_1, s0, len1, len2);
-    GBsetInitialState(composition, s0);
-
-    GBsetStateLabelInfo(composition, GBgetStateLabelInfo(composition));
-
-    GBsetGuardsInfo(composition, GBgetGuardsInfo(model1));
-    GBinitModelDefaults(&composition, model1);
-    GBsetNextStateLong(composition, getTransitionsLong);
-    GBsetNextStateShort(composition, getTransitionsShort);
-    GBcopyChunkMaps(composition, model1);
-}
-
-/**
-model_t
-GBaddCache (model_t model)
-{
-    HREassert (model != NULL, "No model");
-    matrix_t           *p_dm = GBgetDMInfo (model);
-    matrix_t           *p_dm_read = GBgetExpandMatrix (model);
-    matrix_t           *p_dm_may_write = GBgetProjectMatrix (model);
-    int                 N = dm_nrows (p_dm);
-    struct group_cache *cache = RTmalloc (N * sizeof (struct group_cache));
-    for (int i = 0; i < N; i++) {
-        int len = dm_ones_in_row (p_dm, i);
-        cache[i].len = len * sizeof (int);
-        int r_len = dm_ones_in_row (p_dm_read, i);
-        cache[i].r_len = r_len * sizeof (int);
-        int w_len = dm_ones_in_row (p_dm_may_write, i);
-        cache[i].w_len = w_len * sizeof (int);
-        cache[i].idx = SIcreate ();
-        cache[i].edges = 0;
-        cache[i].begin_man = create_manager (256);
-        cache[i].begin = NULL;
-        add_array(cache[i].begin_man,(void*)&(cache[i].begin),sizeof(struct state_info),init_state_info,NULL);
-        cache[i].dest_man = create_manager (256);
-        cache[i].Nedge_labels = lts_type_get_edge_label_count(GBgetLTStype(model));
-        cache[i].dest = NULL;
-        ADD_ARRAY (cache[i].dest_man, cache[i].dest, int);
+    if(matrices_present(GBgetDoNotAccordInfo, models)){
+        combineMatrices(GBgetDoNotAccordInfo, models, p_dm_project);
+        GBsetDoNotAccordInfo(composition, p_dm_project);
     }
-    struct cache_context *ctx = RTmalloc (sizeof *ctx);
-    model_t             cached = GBcreateBase ();
-    ctx->cache = cache;
+    if(matrices_present(GBgetStateLabelInfo, models)){
+        combineMatrices(GBgetStateLabelInfo, models, p_dm_state_label);
+        GBsetStateLabelInfo(composition, p_dm_state_label);
+    }
+    if(matrices_present(GBgetCommutesInfo, models)){
+        combineMatrices(GBgetCommutesInfo, models, p_dm_commute);
+        GBsetCommutesInfo(composition, p_dm_commute);
+    }
+    if(matrices_present(GBgetGuardNDSInfo, models)){
+        combineMatrices(GBgetGuardNDSInfo, models, p_dm_NDS);
+        GBsetGuardNDSInfo(composition, p_dm_NDS);
+    }
+    if(matrices_present(GBgetGuardNESInfo, models)){
+        combineMatrices(GBgetGuardNESInfo, models, p_dm_NES);
+        GBsetGuardNESInfo(composition, p_dm_NES);
+    }
 
-    GBsetContext (cached, ctx);
+    lts_type_t ltstype = lts_type_create();
 
-    GBsetNextStateShort (cached, cached_next_short);
-    GBsetActionsShort (cached, cached_actions_short);
-    GBsetTransitionInGroup (cached, cached_transition_in_group);
+    int state_length = 0;
+    int state_label_count = 0;
+    int edge_label_count = 0;
+    for (int i = 0; i < model_count; i++){
+        state_length += lts_type_get_state_length (GBgetLTStype(models[i]));
+        state_label_count += lts_type_get_state_label_count (GBgetLTStype(models[i]));
+        edge_label_count += lts_type_get_edge_label_count (GBgetLTStype(models[i]));
+    }
+    lts_type_set_state_length(ltstype, state_length);
+    lts_type_set_state_label_count(ltstype, state_label_count);
+    lts_type_set_edge_label_count(ltstype, edge_label_count);
 
-    GBinitModelDefaults (&cached, model);
+    int state_length_counted = 0;
+    int edge_labels_counted = 0;
+    int state_labels_counted = 0;
+    for (int i = 0; i < model_count; i++){
+        for (int j = 0; j < lts_type_get_state_length (GBgetLTStype(models[i])); j++){
+            lts_type_set_state_name(ltstype, j + state_length_counted, lts_type_get_state_name(GBgetLTStype(models[i]), j));
+            lts_type_set_state_type(ltstype, j + state_length_counted, lts_type_get_state_type(GBgetLTStype(models[i]), j));
+            lts_type_set_state_typeno(ltstype, j + state_length_counted, lts_type_get_state_typeno(GBgetLTStype(models[i]), j));
+        }
+        for (int j = 0; j < lts_type_get_edge_label_count (GBgetLTStype(models[i])); j++){
+            lts_type_set_edge_label_name(ltstype, j + edge_labels_counted, lts_type_get_edge_label_name(GBgetLTStype(models[i]), j));
+            lts_type_set_edge_label_type(ltstype, j + edge_labels_counted, lts_type_get_edge_label_type(GBgetLTStype(models[i]), j));
+            lts_type_set_edge_label_typeno(ltstype, j + edge_labels_counted, lts_type_get_edge_label_typeno(GBgetLTStype(models[i]), j));
+        }
+        for (int j = 0; j < lts_type_get_state_label_count (GBgetLTStype(models[i])); j++){
+            lts_type_set_state_label_name(ltstype, j + state_labels_counted, lts_type_get_state_label_name(GBgetLTStype(models[i]), j));
+            lts_type_set_state_label_type(ltstype, j + state_labels_counted, lts_type_get_state_label_type(GBgetLTStype(models[i]), j));
+            lts_type_set_state_label_typeno(ltstype, j + state_labels_counted, lts_type_get_state_label_typeno(GBgetLTStype(models[i]), j));
+        }
+        state_length_counted += lts_type_get_state_length (GBgetLTStype(models[i]));
+        edge_labels_counted += lts_type_get_edge_label_count(GBgetLTStype(models[i]));
+        state_labels_counted += lts_type_get_state_label_count(GBgetLTStype(models[i]));
+    }
 
-    int                 len =
-        lts_type_get_state_length (GBgetLTStype (model));
-    int                 s0[len];
-    GBgetInitialState (model, s0);
-    GBsetInitialState (cached, s0);
+    GBsetLTStype(composition, ltstype);
 
-    GBsetDefaultFilter(cached,GBgetDefaultFilter(model));
+    int len_total = 0;
+    int s0_total[lts_type_get_state_length(ltstype)];
+    for (int i = 0; i < model_count; i++){
+        lts_type_get_state_length (GBgetLTStype(models[i]));
+        int len_local = lts_type_get_state_length (GBgetLTStype(models[i]));
+        int s0_local[len_local];
+        GBgetInitialState(models[i], s0_local);
+        for(int j = 0; j < len_local; j++){
+            s0_total[j + len_total] = s0_local[j];
+            Warning(info, " %d", s0_local[j]);
+        }
+        len_total += len_local;
+    }
 
-    return cached;
+    s0_total[len_total];
+    GBsetInitialState(composition, s0_total);
+
+    //Support copy
+    int support = 1;
+    for(int i = 0; i < model_count && support; i++){
+        support = support && GBsupportsCopy(models[i]);
+    }
+    if(support){
+        GBsetSupportsCopy(composition);
+    }
+
+
+//    GBinitModelDefaults(&composition, model1);
+    GBsetNextStateLong(composition, getTransitionsLong);
+    GBsetStateLabelLong(composition, getStateLabelLong);
+    GBsetTransitionInGroup(composition, transitionInGroup);
+//    GBcopyChunkMaps(composition, model1);
 }
-*/
+

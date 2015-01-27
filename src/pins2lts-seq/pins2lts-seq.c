@@ -130,6 +130,8 @@ static si_map_entry provisos[]={
     {NULL, 0}
 };
 
+static int file_count;
+
 static void
 state_db_popt (poptContext con, enum poptCallbackReason reason,
                const struct poptOption *popt, const char *arg, void *data)
@@ -1836,14 +1838,14 @@ gsea_print_setup ()
 int
 main (int argc, char *argv[])
 {
-    const char *files[2];
+    const char *files[10];
     HREinitBegin(argv[0]); // the organizer thread is called after the binary
     HREaddOptions(options,
                   "Perform a sequential reachability analysis of <model>. "
                   "For LTL model checking, the option --strategy=scc is required."
                   "\n\nOptions");
     lts_lib_setup();
-    HREinitStart(&argc,&argv,1,2,(char**)files,"<model> [<lts>]");
+    HREinitStart(&argc,&argv,1,10,(char**)files,&file_count,"<model> [<lts>]");
 
     Warning (info, "Loading model from %s", files[0]);
     opt.model=GBcreateBase();
@@ -1853,7 +1855,7 @@ main (int argc, char *argv[])
                       (chunkatint_t)HREgreyboxCAtI,
                       (get_count_t)HREgreyboxCount);
 
-    GBloadFile(opt.model,files[0],&opt.model);
+    GBloadFiles(opt.model,files,file_count,&opt.model);
 
     lts_type_t ltstype=GBgetLTStype(opt.model);
     global.N=lts_type_get_state_length(ltstype);
@@ -1865,7 +1867,7 @@ main (int argc, char *argv[])
     int src[global.N];
     GBgetInitialState(opt.model,src);
 
-    gsea_setup(files[1]);
+    gsea_setup(files[file_count]);
     gsea_setup_default();
     gsea_print_setup ();
     gsea_search(src);
