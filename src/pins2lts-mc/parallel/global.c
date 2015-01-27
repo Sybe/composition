@@ -40,7 +40,7 @@ size_t           EL;                // number of edge labels
 void
 global_alloc  (bool procs)
 {
-    GBloadFileShared (NULL, files[0]); // NOTE: no model argument
+    GBloadFilesShared (NULL, files); // NOTE: no model argument
     RTswitchAlloc (procs);
     global = RTmallocZero (sizeof(global_t));
     RTswitchAlloc (false);

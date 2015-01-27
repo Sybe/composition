@@ -13,6 +13,7 @@ typedef enum {Undefined=0,Strong,Branching,Cycle,Determinize,Copy,Silent,Lumping
 static task_t task=Undefined;
 static int segments=1;
 static int divergence_sensitive=0;
+static int file_count;
 
 static void lts_cycle_elim(lts_t lts){
     if (lts->label!=NULL && lts->properties==NULL){
@@ -107,7 +108,7 @@ int main(int argc, char *argv[]){
     HREaddOptions(options,"Tool for signature minimization\n\nOptions");
     char *files[2];
     lts_lib_setup();
-    HREinitStart(&argc,&argv,1,2,files,"<input> [<output>]");
+    HREinitStart(&argc,&argv,1,2,files,&file_count,"<input> [<output>]");
     if (task==Undefined){
         Abort("Please select the reduction to apply.");
     }

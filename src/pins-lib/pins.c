@@ -8,6 +8,7 @@
 #include <pins-lib/pins.h>
 #include <pins-lib/pins-util.h>
 #include <pins-lib/pins2pins-mucalc.h>
+#include <pins-lib/pins2pins-parallel.c>
 #include <util-lib/treedbs.h>
 
 /** \file pins.c */
@@ -1168,14 +1169,23 @@ void chunk_table_print(log_t log, model_t model) {
 }
 
 void
-GBloadFile (model_t model, const char *filename, model_t *wrapped)
+GBloadFiles (model_t model, const char **filenames, int files, model_t *wrapped)
 {
-    char               *extension = strrchr (filename, '.');
+    char               *extension = strrchr (filenames[0], '.');
+    if(0 != strcmp(extension, strrchr(filenames[files - 1], '.'))){
+        files--;
+    }
+    Warning(info,"files:%d", files);
     if (extension) {
         extension++;
         for (int i = 0; i < registered; i++) {
             if (0==strcmp (model_type[i], extension)) {
-                model_loader[i] (model, filename);
+
+                if (files == 1) {
+                    model_loader[i] (model, filenames[0]);
+                } else {
+                    GBparallelCompose(model, filenames, files, model_loader[i]);
+                }
                 model->use_guards=use_guards;
 
                 if (GBgetUseGuards(model)) {
@@ -1242,28 +1252,33 @@ GBloadFile (model_t model, const char *filename, model_t *wrapped)
                extension);
     } else {
         Abort("filename %s doesn't have an extension",
-               filename);
+               filenames[0]);
     }
 }
 
 void
-GBloadFileShared (model_t model, const char *filename)
+GBloadFilesShared (model_t model, const char **filenames, int files)
 {
-    char               *extension = strrchr (filename, '.');
+    char               *extension = strrchr (filenames[0], '.');
     if (extension) {
         extension++;
         for (int i = 0; i < registered_pre; i++) {
             if (0==strcmp (model_type_pre[i], extension)) {
-                model_preloader[i] (model, filename);
+                if (files == 1){
+                    model_preloader[i] (model, filenames[0]);
+                } else {
+                    GBparallelCompose(model, filenames, files, model_preloader[i]);
+                }
                 return;
             }
         }
     } else {
-        Abort("filename %s doesn't have an extension", filename);
+        Abort("filename %s doesn't have an extension", filenames[0]);
     }
 }
 
 void GBregisterLoader(const char*extension,pins_loader_t loader){
+    printf("blaaaat\n");
 	if (registered<MAX_TYPES){
 		model_type[registered]=strdup(extension);
 		model_loader[registered]=loader;
