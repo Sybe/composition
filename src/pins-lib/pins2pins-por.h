@@ -72,6 +72,7 @@
  * Thus visible transitions / labels must be set for these safety properties,
  * the visibility proviso is however only used for liveness properties
  * (see ltl field in por_context_t struct below).
+ * This implements A5' in Valmari's "Stubborn Set Methods for Process Algebras".
  *
  * TODO:
  * - detect bottom SCCs for weak cycle proviso (and communicate ignored
@@ -80,6 +81,7 @@
  */
 
 extern int POR_WEAK;
+extern int NO_L12;
 
 /**
  * Beam search algorithm for persistent sets
@@ -114,6 +116,7 @@ typedef struct por_context {
     ci_list       **label_nes;      // transition groups that form a nes for a guard (guard -> [t1, t2, t..])
     ci_list       **label_nds;      // transition groups that form a nds for a guard
     ci_list       **guard_nce;      // mapping from guards to transition groups that may not be co-enabled
+    ci_list       **group_nce;      // mapping from guards to transition groups that may not be co-enabled
     ci_list       **ns;             // nes/nds combined
     ci_list       **group2ns;       // mapping group to each nes/nds in which it is used
     ci_list       **group_has;      // mapping group to each nes/nds for it
@@ -128,6 +131,7 @@ typedef struct por_context {
     void            *beam_ctx;      // BEAM search struct
     void            *scc_ctx;       // SCC search struct
     void            *del_ctx;       // Deletion struct
+    void            *ample_ctx;     // Ample set context
 
     /**
      * The global data used for the search

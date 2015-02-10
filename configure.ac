@@ -1,5 +1,5 @@
 AC_PREREQ(2.60)
-AC_INIT([ltsmin],[2.0],[ltsmin-support@cs.utwente.nl])
+AC_INIT([ltsmin],[2.0],[ltsmin-support@lists.utwente.nl])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_AUX_DIR([autotools])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
@@ -57,6 +57,9 @@ ACX_PTHREAD(
    CXXFLAGS="$CXXFLAGS $PTHREAD_CFLAGS"
    CC="$PTHREAD_CC"],
   [AC_MSG_FAILURE([no pthread support found.])])
+
+# explicitly link if necessary  
+AC_CHECK_LIB(pthread, pthread_create, [LIBS="$LIBS -lpthread"])
 
 dnl Newer libtool allows this instead:
 dnl LT_PREREQ(2.2)
@@ -128,7 +131,7 @@ AX_CC_COMPILE_CXX_LINK
 
 ACX_MCRL([:],
   [AC_MSG_WARN([no acceptable muCRL installation found.])])
-ACX_MCRL2([:],
+ACX_MCRL2([AC_SUBST(PBES, [$(dirname "$MCRL2")/lps2pbes])],
   [AC_MSG_WARN([no acceptable mCRL2 installation found.])])
 AC_CHECK_PROGS(ASCIIDOC, [asciidoc])
 if test x"$ASCIIDOC" = x && test -d "${srcdir}/.git"; then
@@ -367,10 +370,23 @@ AC_CHECK_PROGS(OPAAL_LTSMIN, [opaal_ltsmin])
 AC_ARG_WITH([scoop],[AS_HELP_STRING([--with-scoop],[Compile scoop])],[],[
     AC_CHECK_PROG(GHC, ghc, ghc)
     AC_CHECK_PROG(HAPPY, happy, happy)
-    if test -z "$GHC" -o -z "$HAPPY" ; then
+    AC_CHECK_PROG(GHCPKG, ghc-pkg, ghcpkg)
+    if test -z "$GHC" -o -z "$HAPPY" -o -z "$GHCPKG" ; then    
         [with_scoop=no]
     else
-        [with_scoop=yes]
+        # the following madness is necessary because the containers package on Ubuntu
+        # installed with ghc-pkg seems incorrectly linked:
+        # https://stackoverflow.com/questions/27291531/haskell-linking-with-dynamic-libraries-on-ubuntu
+        set -o pipefail
+        GHC_DEEPSEQ=`ghc-pkg field deepseq library-dirs 2> /dev/null | sed -n -e 's/^.* //p'`
+        if test -z "$GHC_DEEPSEQ" ; then
+            AC_MSG_WARN([GHC package deepseq not found $GHC_DEEPSEQ])
+            [with_scoop=no]
+    	else
+            AC_MSG_NOTICE([GHC package deepseq found in $GHC_DEEPSEQ])    	    
+            AC_SUBST(SCOOP_LDFLAGS, ["-Wl,-rpath,$GHC_DEEPSEQ"])
+            [with_scoop=yes]
+       	fi
     fi
 ])
 if test "x$with_scoop" == xyes; then
@@ -484,7 +500,7 @@ Configuration:
     MPICXX   = ${MPICXX:-NOT FOUND, building without MPI support}
     OPAAL    = ${have_opaal:-TBB malloc NOT FOUND, building without opaal support}
     PBES     = ${acx_pbes:-NOT FOUND, building without PBES support}
-    SCOOP    = ${have_scoop:-NO, either scoop was disabled or ghc/happy could not be found}
+    SCOOP    = ${have_scoop:-NO, either scoop was disabled or ghc/happy/ghc-pkg/hashmap/deepseq could not be found}
     SPINS    = ${acx_spins:-NO, JDK or Ant not found (override with --with-spins)}
     SYLVAN   = ${have_sylvan:-NO, only on 64-bit systems (override with --with-sylvan)}
     XMLTO    = ${XMLTO:-NOT FOUND, not building manpages}

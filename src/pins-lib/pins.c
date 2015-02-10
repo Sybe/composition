@@ -69,6 +69,8 @@ struct grey_box_model {
 	string_index_t static_info_index;
 	/** Array of static information matrices. */
 	struct static_info_matrix * static_info_matrices;
+
+	int model_nr;
 };
 
 struct static_info_matrix{
@@ -96,6 +98,13 @@ int GBsetMatrix(
     return res;
 }
 
+void GBsetModelNr(model_t model,int nr){
+    model->model_nr = nr;
+}
+
+int GBgetModelNr(model_t model){
+    return model->model_nr;
+}
 
 int GBgetMatrixID(model_t model,char*name){
     return SIlookup(model->static_info_index,name);
@@ -305,13 +314,13 @@ wrapped_default_long (model_t self,int group,int*src,TransitionCB cb,void*contex
 int
 wrapped_default_actions_short (model_t self,int group,int*src,TransitionCB cb,void*context)
 {
-    return GBgetTransitionsShort (GBgetParent(self), group, src, cb, context);
+    return GBgetActionsShort (GBgetParent(self), group, src, cb, context);
 }
 
 int
 wrapped_default_actions_long (model_t self,int group,int*src,TransitionCB cb,void*context)
 {
-    return GBgetTransitionsLong (GBgetParent(self), group, src, cb, context);
+    return GBgetActionsLong (GBgetParent(self), group, src, cb, context);
 }
 
 int
@@ -433,6 +442,7 @@ model_t GBcreateBase(){
 	
 	model->static_info_index=SIcreate();
 	model->static_info_matrices=NULL;
+	model->model_nr=0;
 	ADD_ARRAY(SImanager(model->static_info_index),model->static_info_matrices,struct static_info_matrix);
 	return model;
 }
@@ -609,6 +619,13 @@ lts_type_t GBgetLTStype(model_t model){
 void GBsetDMInfo(model_t model, matrix_t *dm_info) {
 	if (model->dm_info != NULL) Abort("dependency matrix already set");
 	model->dm_info=dm_info;
+
+    // Since the "actions_reads" matrix is a subset of the dependencies
+    // of the combined matrix we may also set the "actions_reads" matrix.
+    if (GBgetMatrixID(model, LTSMIN_MATRIX_ACTIONS_READS) == SI_INDEX_FAILED) {
+        GBsetMatrix(model, LTSMIN_MATRIX_ACTIONS_READS, dm_info, PINS_MAY_SET,
+            PINS_INDEX_GROUP, PINS_INDEX_STATE_VECTOR);
+    }
 }
 
 matrix_t *GBgetDMInfo(model_t model) {
@@ -954,6 +971,7 @@ void GBcopyChunkMaps(model_t dst, model_t src)
  * copying, bad things are likely to happen when dst is used.
  */
 {
+
     dst->newmap_context = src->newmap_context;
     dst->newmap = src->newmap;
     dst->int2chunk = src->int2chunk;
@@ -963,8 +981,10 @@ void GBcopyChunkMaps(model_t dst, model_t src)
 
     int N    = lts_type_get_type_count(GBgetLTStype(src));
     dst->map = RTmallocZero(N*sizeof(void*));
-    for(int i = 0; i < N; i++)
+    for(int i = 0; i < N; i++) {
+        HREassert(src->map != NULL, "Map not correctly initialized, make sure to call GBsetLTStype, before using chunk mapping.");
         dst->map[i] = src->map[i];
+    }
 }
 
 void GBgrowChunkMaps(model_t model, int old_n)
@@ -973,6 +993,7 @@ void GBgrowChunkMaps(model_t model, int old_n)
     int N=lts_type_get_type_count(GBgetLTStype(model));
     model->map=RTmallocZero(N*sizeof(void*));
     for(int i=0;i<N;i++){
+        HREassert(old_map != NULL, "Map not correctly initialized, make sure to call GBsetLTStype, before using chunk mapping.");
         if (i < old_n) {
             model->map[i] = old_map[i];
         } else {
@@ -983,14 +1004,17 @@ void GBgrowChunkMaps(model_t model, int old_n)
 }
 
 void GBchunkPutAt(model_t model,int type_no,const chunk c,int pos){
+    HREassert(model->map != NULL, "Map not correctly initialized, make sure to call GBsetLTStype, before using chunk mapping.");
     model->chunkatint(model->map[type_no],c.data,c.len,pos);
 }
 
 int GBchunkPut(model_t model,int type_no,const chunk c){
+    HREassert(model->map != NULL, "Map not correctly initialized, make sure to call GBsetLTStype, before using chunk mapping.");
 	return model->chunk2int(model->map[type_no],c.data,c.len);
 }
 
 chunk GBchunkGet(model_t model,int type_no,int chunk_no){
+    HREassert(model->map != NULL, "Map not correctly initialized, make sure to call GBsetLTStype, before using chunk mapping.");
 	chunk_len len;
 	int tmp;
 	char* data=(char*)model->int2chunk(model->map[type_no],chunk_no,&tmp);
@@ -1015,6 +1039,7 @@ void GBsetPrettyPrint(model_t model,chunk2pretty_t chunk2pretty){
 }
 
 int GBchunkCount(model_t model,int type_no){
+    HREassert(model->map != NULL, "Map not correctly initialized, make sure to call GBsetLTStype, before using chunk mapping.");
 	return model->get_count(model->map[type_no]);
 }
 
@@ -1072,6 +1097,18 @@ void GBprintPORMatrix(FILE* file, model_t model) {
     if (GBgetGuardNDSInfo(model) != NULL) {
         Printf (info, "\nNecessary disabling matrix:\n");
         dm_print(file, GBgetGuardNDSInfo(model));
+    }
+
+    for (int i = 0; i < GBgetMatrixCount(model); i++) {
+        matrix_t *m = GBgetMatrix(model, i);
+        const char *name = GBgetMatrixName(model, i);
+        //index_class_t k = GBgetMatrixRowInfo(model, i);
+        //index_class_t n = GBgetMatrixColumnInfo(model, i);
+        pins_strictness_t s = GBgetMatrixStrictness(model, i);
+        char *S = (s == PINS_MAY_CLEAR ? "may_clear" :
+                   (s == PINS_MAY_SET ? "may_set" : "strict"));
+        Printf (info, "\n%s : %s (%d X %d):\n", name, S, dm_nrows(m), dm_ncols(m));
+        dm_print(file, m);
     }
 }
 
@@ -1389,6 +1426,7 @@ GBgetUseGuards(model_t model) {
 void*
 GBgetChunkMap(model_t model,int type_no)
 {
+    HREassert(model->map != NULL, "Map not correctly initialized, make sure to call GBsetLTStype, before using chunk mapping.");
 	return model->map[type_no];
 }
 

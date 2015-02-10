@@ -9,12 +9,13 @@
 #include <stdlib.h>
 
 #include <hre/user.h>
+#include <ltsmin-lib/ltsmin-standard.h>
 #include <pins-lib/pins.h>
 
 
 static int model_choice;
-static int *global_source;
-static TransitionCB callb;
+static int *global_source; //TODO dit is niet een nette manier van doorgeven
+static TransitionCB callb; //TODO dit is niet een nette manier van doorgeven
 static model_t *models;
 static int model_count;
 typedef matrix_t* (*matrixCall)(model_t model);
@@ -50,7 +51,6 @@ combineMatrices(matrixCall mc, model_t *models, matrix_t *dst){
 
 //Eigen callback functie
 static void parralel_cb (void*context,transition_info_t*transition_info,int*dst,int*cpy){
-//    Warning(info, "Callback");
     int columns[model_count];
     int columns_total = 0;
     for(int i = 0 ; i < model_count; i++){
@@ -71,6 +71,9 @@ static void parralel_cb (void*context,transition_info_t*transition_info,int*dst,
         }
         cols_counted += columns[i];
     }
+    //TODO transition_info
+
+//    Warning(info, "(%d,%d,%d,%d)->(%d,%d,%d,%d)", global_source[0], global_source[1], global_source[2], global_source[3], dest[0], dest[1], dest[2], dest[3]);
     callb(context, transition_info, dest, cpy);
 }
 
@@ -94,7 +97,6 @@ getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
         if(group < groups[i] + groups_counted && group >= groups_counted){
             model_choice = i;
             int source[state_vars[i]];
-
             for(int j = 0; j < state_vars[i]; j++){
                 source[j] = src[j + state_vars_counted];
 //                Warning(info, "%d", source[j]);
@@ -106,7 +108,7 @@ getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
         groups_counted += groups[i];
         state_vars_counted += state_vars[i];
     }
- //   Warning(info, "Result:%d", result);
+//    Warning(info, "Result:%d", result);
     return result;
 }
 
@@ -135,7 +137,28 @@ getStateLabelLong(model_t m, int label, int *state){
         labels_counted += labels[i];
         state_vars_counted += state_vars[i];
     }
+    return result;
+}
 
+int
+getTransitionsAll(model_t model,int*src,TransitionCB cb,void*context){
+    global_source = src;
+    callb = cb;
+    int result = 0;
+    int state_vars[model_count];
+    for(int i = 0; i < model_count; i++){
+        state_vars[i] = lts_type_get_state_length (GBgetLTStype(models[i]));
+    }
+    int state_vars_counted = 0;
+    for(int i = 0; i < model_count; i++){
+        model_choice = i;
+        int local_source[state_vars[i]];
+        for(int j = 0; j < state_vars[i]; j++){
+            local_source[j] = src[state_vars_counted + j];
+        }
+        result += GBgetTransitionsAll(models[i], local_source, parralel_cb, context);
+        state_vars_counted += state_vars[i];
+    }
     return result;
 }
 
@@ -176,6 +199,11 @@ matrices_present(matrixCall mc, model_t *models){
 void
 GBparallelCompose (model_t composition, char **files, int file_count, pins_loader_t loader)
 {
+    //If mapa/prcrl & file_count > 2 -> abort("Parallel composition only defined for 2 models")
+    if(strcmp(strrchr(files[0], '.'), "mapa") && file_count > 2){
+        Abort(" Parallel composition for mapa only defined for 2 models, given %d models", file_count);
+    }
+    Warning(info, "Comparison result: %d", strcmp(strrchr(files[0], '.'), strrchr(files[file_count - 1], '.')));
 
     Warning(info, "Initializing awesome parallel composition layer");
     model_count = file_count;
@@ -189,11 +217,13 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
                           HREgreyboxC2I,
                           HREgreyboxCAtI,
                           HREgreyboxCount);
+        GBsetModelNr(models[i], i);
         Warning(info, "Starting loader");
         loader(models[i], files[i]);
         Warning(info, "Loader finished");
     }
     Warning(info, "Models to compose:%d",file_count);
+
 
     matrix_t *p_dm              = RTmalloc(sizeof(matrix_t));
     matrix_t *p_dm_read         = RTmalloc(sizeof(matrix_t));
@@ -210,6 +240,7 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
         combineMatrices(GBgetDMInfo, models, p_dm);
         GBsetDMInfo(composition, p_dm);
     }
+
     if(matrices_present(GBgetDMInfoRead, models)){
         combineMatrices(GBgetDMInfoRead, models, p_dm_read);
         GBsetDMInfoRead(composition, p_dm_read);
@@ -251,7 +282,66 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
         combineMatrices(GBgetGuardNESInfo, models, p_dm_NES);
         GBsetGuardNESInfo(composition, p_dm_NES);
     }
+    //GBsetMatrix
+    //Class matrix
+    int id[model_count];
+    int rows_class[model_count];
+    int columns_class[model_count];
+    int tot_rows_class = 0;
+    int tot_columns_class = 0;
+    int class_matrix_needed = 1;
+    for(int i = 0; i < model_count; i++){
+        id[i] = GBgetMatrixID(models[i],LTSMIN_EDGE_TYPE_ACTION_CLASS);
+        if (id[i] >= 0){
+            rows_class[i] = dm_nrows(GBgetMatrix(models[i], id[i]));
+            columns_class[i] = dm_ncols(GBgetMatrix(models[i], id[i]));
+            tot_rows_class += rows_class[i];
+            tot_columns_class += columns_class[i];
+        } else {
+            class_matrix_needed = 0;
+        }
+    }
+    if(class_matrix_needed){
+        static matrix_t p_dm_class;//          = RTmalloc(sizeof(matrix_t));
+        dm_create(&p_dm_class, rows_class[0], tot_columns_class);
+        Warning(info, "Rows:%d", rows_class[0]);
+        int class_columns_counted = 0;
+        for(int i = 0; i < model_count; i++){
+            for(int j = 0; j < rows_class[i]; j++){
+                for(int k = 0; k <columns_class[i]; k++){
+                    if(dm_is_set(GBgetMatrix(models[i], id[i]), j, k)){
+                        dm_set(&p_dm_class, j, k + class_columns_counted);
+                    }
+                }
+            }
+            class_columns_counted += columns_class[i];
+        }
+        GBsetMatrix(composition,LTSMIN_EDGE_TYPE_ACTION_CLASS,&p_dm_class,PINS_STRICT,PINS_INDEX_OTHER,PINS_INDEX_GROUP);
+    }
+    //Inhibit matrix
+    int inhibit_id = GBgetMatrixID(models[0], "inhibit");
+    if(inhibit_id != 0){
+        static matrix_t p_dm_inhibit ;//         = RTmalloc(sizeof(matrix_t));
+        dm_create(&p_dm_inhibit, 3, 3);
+        for(int i = 0; i < 3; i ++){
+            for(int j = 0; j < 3; j++){
+                if(dm_is_set(GBgetMatrix(models[0], inhibit_id), i, j)){
+                    dm_set(&p_dm_inhibit, i, j);
+                }
+            }
+        }
+        GBsetMatrix(composition,"inhibit",&p_dm_inhibit,PINS_STRICT,PINS_INDEX_OTHER,PINS_INDEX_OTHER);
+    }/*
+    if (inhibit_id != 0){
+        static matrix_t progress_matrix;
+        dm_create(&progress_matrix,3,3);
+        dm_set(&progress_matrix,0,2);
+        dm_set(&progress_matrix,1,2);
+        int id=GBsetMatrix(composition,"inhibit",&progress_matrix,PINS_STRICT,PINS_INDEX_OTHER,PINS_INDEX_OTHER);
+        Warning(info,"inhibit matrix registered as %d",id);
+    }*/
 
+    //LTS Type
     lts_type_t ltstype = lts_type_create();
 
     int state_length = 0;
@@ -320,6 +410,7 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
 
 
 //    GBinitModelDefaults(&composition, model1);
+    GBsetNextStateAll(composition, getTransitionsAll);
     GBsetNextStateLong(composition, getTransitionsLong);
     GBsetStateLabelLong(composition, getStateLabelLong);
     GBsetTransitionInGroup(composition, transitionInGroup);

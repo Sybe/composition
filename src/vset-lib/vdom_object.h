@@ -26,7 +26,8 @@ struct vector_domain_shared {
 	void (*set_copy_match_proj)(vset_t src,vset_t dst,int p_len,int* proj,int p_id,int*match);
 	int (*proj_create)(int p_len,int* proj);
 	void (*set_example)(vset_t set,int *e);
-        void (*set_example_match)(vset_t set,int *e, int p_len, int* proj, int*match);
+	void (*set_example_match)(vset_t set,int *e, int p_len, int* proj, int*match);
+    void (*set_random)(vset_t set,int *e);
 	void (*set_copy)(vset_t dst,vset_t src);
 	void (*set_project)(vset_t dst,vset_t src);
     void (*set_project_minus)(vset_t dst,vset_t src,vset_t minus);
@@ -45,6 +46,7 @@ struct vector_domain_shared {
 	void (*rel_add)(vrel_t rel,const int* src,const int* dst);
     void (*rel_add_cpy)(vrel_t rel,const int* src,const int* dst,const int* cpy);
     void (*rel_update)(vrel_t rel, vset_t set, vrel_update_cb cb, void *context);
+    void (*rel_destroy)(vrel_t rel);
 
 	void (*set_next)(vset_t dst,vset_t src,vrel_t rel);
 	void (*set_prev)(vset_t dst,vset_t src,vrel_t rel,vset_t univ);
@@ -68,6 +70,9 @@ struct vector_domain_shared {
 	int (*separates_rw)();
 	int (*supports_cpy)();
 	char **names;
+
+	// init universe should be called after vdom_create_domain
+	void (*init_universe)(vdom_t dom);
 };
 
 /** Initialise the shared part of the domain. */

@@ -259,7 +259,7 @@ void vdom_set_name(vdom_t dom, int i, char* name) {
 }
 
 char* vdom_get_name(vdom_t dom, int i) {
-    if (i >= dom->shared.size) Abort("Variable does not exist");
+    if (i >= dom->shared.size) { Abort("Variable %d does not exist", i); }
     return dom->shared.names[i];
 }
 
@@ -395,6 +395,15 @@ void vset_example(vset_t set,int *e){
        set->dom->shared.set_example(set,e);
 }
 
+void vset_random(vset_t set,int *e){
+    if (set->dom->shared.set_random==NULL) {
+        Warning(hre_debug, "Generating random elements not supported.");
+        set->dom->shared.set_example(set, e);
+    } else {
+       set->dom->shared.set_random(set, e);
+    }
+}
+
 void vset_example_match(vset_t set,int *e, int p_len, int* proj, int* match){
         set->dom->shared.set_example_match(set,e,p_len,proj,match);
 }
@@ -493,7 +502,11 @@ void vrel_dot(FILE* fp, vrel_t src) {
 }
 
 void vset_join(vset_t dst, vset_t left, vset_t right) {
-    dst->dom->shared.set_join(dst,left,right);
+    if (dst->dom->shared.set_join==NULL){
+        Abort("Vector set implementation does not support vset_join operation.");
+    } else {
+        dst->dom->shared.set_join(dst,left,right);
+    }
 }
 
 void
@@ -534,4 +547,10 @@ int
 vdom_vector_size(vdom_t dom)
 {
     return dom->shared.size;
+}
+
+void
+vdom_init_universe(vdom_t dom)
+{
+    if (dom->shared.init_universe != NULL) dom->shared.init_universe(dom);
 }

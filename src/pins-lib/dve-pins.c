@@ -557,4 +557,6 @@ DVE2loadGreyboxModel(model_t model, const char *filename)
     GBsetActionsLong (model, (next_method_grey_t) get_action);
     GBsetIsCoveredBy (model, covered_by);
     GBsetIsCoveredByShort (model, covered_by_short);
+
+    dlHandle = NULL;
 }

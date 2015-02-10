@@ -46,6 +46,7 @@ typedef struct counter_s {
     size_t              deadlocks;      // deadlock count
     size_t              violations;     // invariant violation count
     size_t              errors;         // assertion error count
+    size_t              ignoring;       // times the ignoring proviso was fulfilled
 } counter_t;
 
 struct alg_global_s {
@@ -59,6 +60,7 @@ struct alg_local_s {
     counter_t           counters;       // Stats counters
     fset_t             *cyan;           // Proviso stack
     int                 flip;           // PBFS queue counter
+    int                 proviso;        // proviso check
 
     lts_file_t          lts;
     ltsmin_parse_env_t  env;

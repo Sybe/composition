@@ -187,7 +187,7 @@ action_detect (struct src_info *context, transition_info_t *ti , int *dst)
     if (trc_output!=NULL){
         uint32_t ofs=context->ofs;
         Warning(info,"Error action '%s'  found at %u.%u", act_detect, ctx->mpi_me, ofs);
-        start_trace_edge(ctx,ctx->mpi_me,ofs,dst,ti->labels);
+        start_trace_edge(ctx,ctx->mpi_me,ofs,(uint32_t*)dst,(uint32_t*)ti->labels);
         return;
     }
     if (no_exit) return;
@@ -266,7 +266,7 @@ static void extend_trace(struct dist_thread_context* ctx,uint32_t* trc_vector){
         switch(edge_labels){
             case 0: break;
             case 1: message[5]=ctx->parent_edge[trc_vector[3]]; break;
-            default: TreeUnfold(ctx->edge_dbs,ctx->parent_edge[trc_vector[3]],message+5);
+            default: TreeUnfold(ctx->edge_dbs,ctx->parent_edge[trc_vector[3]],(int*)message+5);
         }
         ctx->trace_next++;
         TaskSubmitFixed(ctx->extend_task,seg,message);
@@ -309,7 +309,7 @@ static void new_transition(void*context,int src_seg,int len,void*arg){
                 case 0: break;
                 case 1: ctx->parent_edge[temp]=*(trans+lbl_ofs); break;
                 default:
-                    ctx->parent_edge[temp]=TreeFold(ctx->edge_dbs,trans+lbl_ofs);
+                    ctx->parent_edge[temp]=TreeFold(ctx->edge_dbs,(int*)trans+lbl_ofs);
             }
         }
         if (cost!=NULL){
@@ -363,7 +363,7 @@ static void new_transition(void*context,int src_seg,int len,void*arg){
                     case 0: break;
                     case 1: ctx->parent_edge[temp]=*(trans+lbl_ofs); break;
                     default:
-                        ctx->parent_edge[temp]=TreeFold(ctx->edge_dbs,trans+lbl_ofs);
+                        ctx->parent_edge[temp]=TreeFold(ctx->edge_dbs,(int*)trans+lbl_ofs);
                 }
             }
         }
@@ -373,7 +373,7 @@ static void new_transition(void*context,int src_seg,int len,void*arg){
     }
     ctx->tcount[src_seg]++;
     ctx->targets++;
-    if (cost!=NULL && ctx->cost_queue[temp].cost==ctx->level){
+    if (cost!=NULL && ctx->cost_queue[temp].cost==(int)ctx->level){
         // new state in current level, requires wait to be cancelled.
         TQwaitCancel(ctx->task_queue);
     }
@@ -560,15 +560,18 @@ static void get_repr(model_t model,matrix_t* confluent,int *state){
     TreeDBSfree(ctx.dbs);
 }
 
-static void empty_cost_list(void*arg,void*old_array,int old_size,struct cost_meta *new_array,int new_size){
+static void
+empty_cost_list (void*arg,void*old_array,int old_size,struct cost_meta *new_array,int new_size)
+{
     for(int i=old_size;i<new_size;i++){
         new_array[i].head=-1;
         new_array[i].tail=-1;
     }
+    (void) old_array; (void) arg;
 }
 
 int main(int argc, char*argv[]){
-    char *files[2];
+    char *files[10];
     HREinitBegin(argv[0]);
     HREaddOptions(options,"Perform a distributed enumerative reachability analysis of <model>\n\nOptions");
     lts_lib_setup();
@@ -576,7 +579,7 @@ int main(int argc, char*argv[]){
     if (!SPEC_MT_SAFE){
         HREenableThreads(0, false);
     }
-    HREinitStart(&argc,&argv,1,2,files,&file_count,"<model> [<lts>]");
+    HREinitStart(&argc,&argv,1,10,files,&file_count,"<model> [<lts>]");
 
     struct dist_thread_context ctx;
     mpi_nodes=HREpeers(HREglobal());
@@ -596,7 +599,7 @@ int main(int argc, char*argv[]){
                       HREgreyboxCAtI,
                       HREgreyboxCount);
 
-    if (ctx.mpi_me == 0)
+    if (ctx.mpi_me == 1)//==0
         GBloadFilesShared(model,files[0],file_count);
     HREbarrier(HREglobal());
     GBloadFiles(model,files,file_count,&model);
@@ -745,6 +748,7 @@ int main(int argc, char*argv[]){
     HREbarrier(HREglobal());
     /***************************************************/
     GBgetInitialState(model,src);
+    Warning(info,"initial state:(%d,%d,%d,%d), size: %d", src[0], src[1], src[2], src[3], size);
     Warning(info,"initial state computed at %d",ctx.mpi_me);
     if (confluence_matrix!=NULL){
       get_repr(model,confluence_matrix,src);
@@ -774,8 +778,8 @@ int main(int argc, char*argv[]){
     }
     /***************************************************/
     HREbarrier(HREglobal());
-    if (files[1]) {
-        Warning(info,"Writing output to %s",files[1]);
+    if (file_count > 1 && (0 != strcmp(strrchr(files[0], '.'), strrchr(files[file_count - 1], '.')))) {
+        Warning(info,"Writing output to %s",files[file_count - 1]);
         write_lts=1;
         // get default filter.
         string_set_t label_set=GBgetDefaultFilter(model);
@@ -785,13 +789,13 @@ int main(int argc, char*argv[]){
         }
         if (write_state) {
             // write-state means write everything.
-            ctx.output=lts_file_create(files[1],ltstype,mpi_nodes,lts_index_template());
+            ctx.output=lts_file_create(files[file_count - 1],ltstype,mpi_nodes,lts_index_template());
         } else if (label_set!=NULL) {
-            ctx.output=lts_file_create_filter(files[1],ltstype,label_set,mpi_nodes,lts_index_template());
+            ctx.output=lts_file_create_filter(files[file_count - 1],ltstype,label_set,mpi_nodes,lts_index_template());
             write_state=1;
         } else {
             // default is all state labels and all edge labels
-            ctx.output=lts_file_create_nostate(files[1],ltstype,mpi_nodes,lts_index_template());
+            ctx.output=lts_file_create_nostate(files[file_count - 1],ltstype,mpi_nodes,lts_index_template());
             if (state_labels>0) write_state=1;
         }
         int T=lts_type_get_type_count(ltstype);
@@ -887,8 +891,10 @@ int main(int argc, char*argv[]){
                             if (j<i) continue;
                             if (class_label>=0){
                                 class_count[i]=GBgetTransitionsMatching(model,class_label,i,src,callback,&src_ctx);
+                                Warning(info, "Matching");
                             } else if (class_matrix!=NULL) {
                                 class_count[i]=GBgetTransitionsMarked(model,class_matrix,i,src,callback,&src_ctx);
+                                Warning(info, "Marked");
                             } else {
                                 Abort("inhibit set, but no known classification found.");
                             }

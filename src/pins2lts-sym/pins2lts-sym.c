@@ -107,6 +107,7 @@ static int expand_groups = 1; // set to 0 if transitions are loaded from file
 #ifdef HAVE_SYLVAN
 static size_t lace_n_workers = 0;
 static size_t lace_dqsize = 40960000; // can be very big, no problemo
+static size_t lace_stacksize = 0; // use default
 
 static bool multi_process = false;
 #endif
@@ -198,6 +199,7 @@ reach_popt(poptContext con, enum poptCallbackReason reason,
 static struct poptOption lace_options[] = {
     { "lace-workers", 0, POPT_ARG_INT|POPT_ARGFLAG_SHOW_DEFAULT, &lace_n_workers , 0 , "set number of Lace workers (threads for parallelization)","<workers>"},
     { "lace-dqsize",0, POPT_ARG_INT|POPT_ARGFLAG_SHOW_DEFAULT, &lace_dqsize , 0 , "set length of Lace task queue","<dqsize>"},
+    { "lace-stacksize", 0, POPT_ARG_INT|POPT_ARGFLAG_SHOW_DEFAULT, &lace_stacksize, 0, "set size of program stack in kilo bytes (0=default stack size)", "<stacksize>"},
 POPT_TABLEEND
 };
 #endif
@@ -321,6 +323,17 @@ VOID_TASK_2(vset_intersect_par, vset_t, dst, vset_t, src) { vset_intersect(dst, 
 #define vset_minus_par(dst, src) SPAWN(vset_minus_par, dst, src)
 VOID_TASK_2(vset_minus_par, vset_t, dst, vset_t, src) { vset_minus(dst, src); }
 #endif
+
+static inline void
+reduce(int group, vset_t set)
+{
+    if (GBgetUseGuards(model)) {
+        guard_t* guards = GBgetGuard(model, group);
+        for (int g = 0; g < guards->count && !vset_is_empty(set); g++) {
+            vset_join(set, set, guard_true[guards->guard[g]]);
+        }
+    }
+}
 
 static inline void
 grow_levels(int new_levels)
@@ -470,6 +483,8 @@ find_trace_to(int trace_end[][N], int end_count, int level, vset_t *levels,
 
             for (int i=0; i < nGrps; i++) {
                 vset_prev(temp, int_levels[int_level - 1], group_next[i], levels[level-1]); // just use last level as universe // TODO FIXME
+                reduce(i, temp);
+
                 vset_union(int_levels[int_level], temp);
                 vset_intersect(temp, levels[prev_level]);
                 if (!vset_is_empty(temp)) break; // found a good ancestor! we can leave now!
@@ -501,6 +516,7 @@ find_trace_to(int trace_end[][N], int end_count, int level, vset_t *levels,
             vset_add(src_set, states[current_state + i]);
 
             for(int j = 0; j < nGrps; j++) {
+                reduce(j, temp);
                 vset_next(temp, src_set, group_next[j]);
                 vset_union(dst_set, temp);
             }
@@ -711,22 +727,29 @@ group_add(void *context, transition_info_t *ti, int *dst, int *cpy)
 
                 if (trc_output) {
 
-                    ctx->trace_action = (struct trace_action*) realloc(ctx->trace_action, (sizeof(struct trace_action) + sizeof(int[N])*2) * (ctx->trace_count+1));
+                    size_t vec_bytes = sizeof(int[w_projs[ctx->group].len]);
 
-                    // set the right addresses in the allocated block
-                    ctx->trace_action[ctx->trace_count].dst = (int*) (&ctx->trace_action[ctx->trace_count] + sizeof(struct trace_action));
-                    ctx->trace_action[ctx->trace_count].cpy = (int*) (&ctx->trace_action[ctx->trace_count].dst + sizeof(int[N]));
+                    ctx->trace_action = (struct trace_action*) RTrealloc(ctx->trace_action, sizeof(struct trace_action) * (ctx->trace_count+1));
+                    ctx->trace_action[ctx->trace_count].dst = (int*) RTmalloc(vec_bytes);
+                    if (cpy != NULL) {
+                        ctx->trace_action[ctx->trace_count].cpy = (int*) RTmalloc(vec_bytes);
+                    } else {
+                        ctx->trace_action[ctx->trace_count].cpy = NULL;
+                    }
 
                     // set the required values in order to find the trace after the next-state call
-                    memcpy(ctx->trace_action[ctx->trace_count].dst, dst, w_projs[ctx->group].len);
-                    memcpy(ctx->trace_action[ctx->trace_count].cpy, cpy, w_projs[ctx->group].len);
+                    memcpy(ctx->trace_action[ctx->trace_count].dst, dst, vec_bytes);
+                    if (cpy != NULL) memcpy(ctx->trace_action[ctx->trace_count].cpy, cpy, vec_bytes);
                     ctx->trace_action[ctx->trace_count].action = action;
 
                     ctx->trace_count++;
                 }
 
-                // ErrorActions++
+#ifdef HAVE_SYLVAN
                 add_fetch(ErrorActions, 1);
+#else
+                ErrorActions++;
+#endif
             }
         }
     }
@@ -749,9 +772,11 @@ explore_cb(vrel_t rel, void *context, int *src)
         for (int i = 0; i < ctx.trace_count; i++) {
             vset_example_match(ctx.set,long_src,r_projs[ctx.group].len, r_projs[ctx.group].proj,src);
             find_action(long_src,ctx.trace_action[i].dst,ctx.trace_action[i].cpy,ctx.group,ctx.trace_action[i].action);
+            RTfree(ctx.trace_action[i].dst);
+            if (ctx.trace_action[i].cpy != NULL) RTfree(ctx.trace_action[i].cpy);
         }
 
-        free(ctx.trace_action);
+        RTfree(ctx.trace_action);
     }
 }
 
@@ -823,6 +848,63 @@ valid_end_cb(void *context, int *src)
     }
 }
 
+static inline void
+learn_guards_reduce(vset_t true_states, int t, long *guard_count, vset_t *guard_maybe, vset_t false_states, vset_t maybe_states, vset_t tmp) {
+
+    LACE_ME;
+    if (GBgetUseGuards(model)) {
+        guard_t* guards = GBgetGuard(model, t);
+        for (int g = 0; g < guards->count && !vset_is_empty(true_states); g++) {
+            if (guard_count != NULL) (*guard_count)++;
+            eval_guard(guards->guard[g], true_states);
+
+            if (!no_soundness_check) {
+
+                // compute guard_maybe (= guard_true \cap guard_false)
+                vset_copy(guard_maybe[guards->guard[g]], guard_true[guards->guard[g]]);
+                vset_intersect(guard_maybe[guards->guard[g]], guard_false[guards->guard[g]]);
+
+                if (!SPEC_MAYBE_AND_FALSE_IS_FALSE) {
+                    // If we have Promela, Java etc. then if we encounter a maybe guard then this is an error.
+                    // Because every guard is evaluated in order.
+                    if (!vset_is_empty(guard_maybe[guards->guard[g]])) {
+                        Warning(info, "Condition in group %d does not evaluate to true or false", t);
+                        HREabort(LTSMIN_EXIT_UNSOUND);
+                    }
+                } else {
+                    // If we have mCRL2 etc., then we need to store all (real) false states and maybe states
+                    // and see if after evaluating all guards there are still maybe states left.
+                    vset_join(tmp, true_states, guard_false[guards->guard[g]]);
+                    vset_union(false_states, tmp);
+                    vset_join(tmp, true_states, guard_maybe[guards->guard[g]]);
+                    vset_minus(false_states,tmp);
+                    vset_union(maybe_states, tmp);
+                }
+                vset_clear(guard_maybe[guards->guard[g]]);
+            }
+            vset_join(true_states, true_states, guard_true[guards->guard[g]]);
+        }
+
+        if (!no_soundness_check && SPEC_MAYBE_AND_FALSE_IS_FALSE) {
+            vset_copy(tmp, maybe_states);
+            vset_minus(tmp, false_states);
+            if (!vset_is_empty(tmp)) {
+                Warning(info, "Condition in group %d does not evaluate to true or false", t);
+                HREabort(LTSMIN_EXIT_UNSOUND);
+            }
+            vset_clear(tmp);
+            vset_clear(maybe_states);
+            vset_clear(false_states);
+        }
+
+        if (!no_soundness_check) {
+            for (int g = 0; g < guards->count; g++) {
+                vset_minus(guard_true[guards->guard[g]], guard_false[guards->guard[g]]);
+            }
+        }
+    }
+}
+
 static void
 deadlock_check(vset_t deadlocks, bitvector_t *reach_groups)
 // checks for deadlocks, generate trace if requested, and unsets dlk_detect
@@ -830,22 +912,55 @@ deadlock_check(vset_t deadlocks, bitvector_t *reach_groups)
     if (vset_is_empty(deadlocks))
         return;
 
+    Warning(debug, "Potential deadlocks found");
+
     vset_t next_temp = vset_create(domain, -1, NULL);
     vset_t prev_temp = vset_create(domain, -1, NULL);
+    vset_t new_reduced[nGrps];
 
-    Warning(debug, "Potential deadlocks found");
+    for(int i=0;i<nGrps;i++) {
+        new_reduced[i]=vset_create(domain, -1, NULL);
+    }
+
+    vset_t guard_maybe[nGuards];
+    vset_t tmp = NULL;
+    vset_t false_states = NULL;
+    vset_t maybe_states = NULL;
+    if (!no_soundness_check && GBgetUseGuards(model)) {
+        for(int i=0;i<nGuards;i++) {
+            guard_maybe[i] = vset_create(domain, g_projs[i].len, g_projs[i].proj);
+        }
+        false_states = vset_create(domain, -1, NULL);
+        maybe_states = vset_create(domain, -1, NULL);
+        tmp = vset_create(domain, -1, NULL);
+    }
 
     LACE_ME;
     for (int i = 0; i < nGrps; i++) {
         if (bitvector_is_set(reach_groups, i)) continue;
-        expand_group_next(i, deadlocks);
-        vset_next(next_temp, deadlocks, group_next[i]);
-        vset_prev(prev_temp, next_temp, group_next[i],deadlocks);
+        vset_copy(new_reduced[i], deadlocks);
+        learn_guards_reduce(new_reduced[i], i, NULL, guard_maybe, false_states, maybe_states, tmp);
+        expand_group_next(i, new_reduced[i]);
+        vset_next(next_temp, new_reduced[i], group_next[i]);
+        vset_prev(prev_temp, next_temp, group_next[i],new_reduced[i]);
+        reduce(i, prev_temp);
         vset_minus(deadlocks, prev_temp);
     }
 
     vset_destroy(next_temp);
     vset_destroy(prev_temp);
+
+    for(int i=0;i<nGrps;i++) {
+        vset_destroy(new_reduced[i]);
+    }
+    if(!no_soundness_check && GBgetUseGuards(model)) {
+        for(int i=0;i<nGuards;i++) {
+            vset_destroy(guard_maybe[i]);
+        }
+        vset_destroy(tmp);
+        vset_destroy(false_states);
+        vset_destroy(maybe_states);
+    }
 
     if (vset_is_empty(deadlocks))
         return;
@@ -1341,7 +1456,10 @@ reach_bfs_next(struct reach_s *dummy, bitvector_t *reach_groups, vset_t* maybe)
         dummy->next_count = 1;
 
         // Compute ancestor states
-        if (dummy->ancestors != NULL) vset_prev(dummy->ancestors, dummy->container, group_next[dummy->index], dummy->ancestors);
+        if (dummy->ancestors != NULL) {
+            vset_prev(dummy->ancestors, dummy->container, group_next[dummy->index], dummy->ancestors);
+            reduce(dummy->index, dummy->ancestors);
+        }
 
         // Remove ancestor states from potential deadlock states
         if (dummy->deadlocks != NULL) vset_minus(dummy->deadlocks, dummy->ancestors);
@@ -1408,7 +1526,7 @@ learn_guards(vset_t states, long *guard_count) {
     LACE_ME;
     if (GBgetUseGuards(model)) {
         for (int g = 0; g < nGuards; g++) {
-            (*guard_count)++;
+            if (guard_count != NULL) (*guard_count)++;
             SPAWN(eval_guard, g, states);
         }
     }
@@ -1417,7 +1535,7 @@ learn_guards(vset_t states, long *guard_count) {
     #else
     if (GBgetUseGuards(model)) {
         for (int g = 0; g < nGuards; g++) {
-            (*guard_count)++;
+            if (guard_count != NULL) (*guard_count)++;
             eval_guard(g, states);
         }
     }
@@ -1813,7 +1931,10 @@ VOID_TASK_3(reach_par_next, struct reach_s *, dummy, bitvector_t *, reach_groups
         dummy->next_count = 1;
 
         // Compute ancestor states
-        if (dummy->ancestors != NULL) vset_prev(dummy->ancestors, dummy->container, group_next[dummy->index], dummy->ancestors);
+        if (dummy->ancestors != NULL) {
+            vset_prev(dummy->ancestors, dummy->container, group_next[dummy->index], dummy->ancestors);
+            reduce(dummy->index, dummy->ancestors);
+        }
 
         // Remove ancestor states from potential deadlock states
         if (dummy->deadlocks != NULL) vset_minus(dummy->deadlocks, dummy->ancestors);
@@ -2104,63 +2225,6 @@ reach_par_prev(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
 
 #endif
 
-static inline void
-learn_guards_reduce(vset_t true_states, int t, long *guard_count, vset_t *guard_maybe, vset_t false_states, vset_t maybe_states, vset_t tmp) {
-
-    LACE_ME;
-    if (GBgetUseGuards(model)) {
-        guard_t* guards = GBgetGuard(model, t);
-        for (int g = 0; g < guards->count && !vset_is_empty(true_states); g++) {
-            (*guard_count)++;
-            eval_guard(guards->guard[g], true_states);
-
-            if (!no_soundness_check) {
-
-                // compute guard_maybe (= guard_true \cap guard_false)
-                vset_copy(guard_maybe[guards->guard[g]], guard_true[guards->guard[g]]);
-                vset_intersect(guard_maybe[guards->guard[g]], guard_false[guards->guard[g]]);
-
-                if (!SPEC_MAYBE_AND_FALSE_IS_FALSE) {
-                    // If we have Promela, Java etc. then if we encounter a maybe guard then this is an error.
-                    // Because every guard is evaluated in order.
-                    if (!vset_is_empty(guard_maybe[guards->guard[g]])) {
-                        Warning(info, "Condition in group %d does not evaluate to true or false", t);
-                        HREabort(LTSMIN_EXIT_UNSOUND);
-                    }
-                } else {
-                    // If we have mCRL2 etc., then we need to store all (real) false states and maybe states
-                    // and see if after evaluating all guards there are still maybe states left.
-                    vset_join(tmp, true_states, guard_false[guards->guard[g]]);
-                    vset_union(false_states, tmp);
-                    vset_join(tmp, true_states, guard_maybe[guards->guard[g]]);
-                    vset_minus(false_states,tmp);
-                    vset_union(maybe_states, tmp);
-                }
-                vset_clear(guard_maybe[guards->guard[g]]);
-            }
-            vset_join(true_states, true_states, guard_true[guards->guard[g]]);
-        }
-
-        if (!no_soundness_check && SPEC_MAYBE_AND_FALSE_IS_FALSE) {
-            vset_copy(tmp, maybe_states);
-            vset_minus(tmp, false_states);
-            if (!vset_is_empty(tmp)) {
-                Warning(info, "Condition in group %d does not evaluate to true or false", t);
-                HREabort(LTSMIN_EXIT_UNSOUND);
-            }
-            vset_clear(tmp);
-            vset_clear(maybe_states);
-            vset_clear(false_states);
-        }
-
-        if (!no_soundness_check) {
-            for (int g = 0; g < guards->count; g++) {
-                vset_minus(guard_true[guards->guard[g]], guard_false[guards->guard[g]]);
-            }
-        }
-    }
-}
-
 static void
 reach_chain_prev(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
                      long *eg_count, long *next_count, long *guard_count)
@@ -2180,7 +2244,7 @@ reach_chain_prev(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
     vset_t tmp = NULL;
     vset_t false_states = NULL;
     vset_t maybe_states = NULL;
-    if (!no_soundness_check) {
+    if (!no_soundness_check && GBgetUseGuards(model)) {
         for(int i=0;i<nGuards;i++) {
             guard_maybe[i] = vset_create(domain, g_projs[i].len, g_projs[i].proj);
         }
@@ -2199,7 +2263,7 @@ reach_chain_prev(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
         if (dlk_detect) vset_copy(deadlocks, new_states);
         for (int i = 0; i < nGrps; i++) {
             if (!bitvector_is_set(reach_groups, i)) continue;
-            if (trc_output != NULL) save_level(new_states);
+            if (trc_output != NULL) save_level(visited);
             vset_copy(new_reduced[i], new_states);
             learn_guards_reduce(new_reduced[i], i, guard_count, guard_maybe, false_states, maybe_states, tmp);
 
@@ -2211,6 +2275,7 @@ reach_chain_prev(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
                 vset_next(temp, new_reduced[i], group_next[i]);
                 if (dlk_detect) {
                     vset_prev(dlk_temp, temp, group_next[i], deadlocks);
+                    reduce(i, dlk_temp);
                     vset_minus(deadlocks, dlk_temp);
                     vset_clear(dlk_temp);
                 }
@@ -2237,7 +2302,7 @@ reach_chain_prev(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
         vset_destroy(deadlocks);
         vset_destroy(dlk_temp);
     }
-    if(!no_soundness_check) {
+    if(!no_soundness_check && GBgetUseGuards(model)) {
         for(int i=0;i<nGuards;i++) {
             vset_destroy(guard_maybe[i]);
         }
@@ -2268,7 +2333,7 @@ reach_chain(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
     vset_t tmp = NULL;
     vset_t false_states = NULL;
     vset_t maybe_states = NULL;
-    if (!no_soundness_check) {
+    if (!no_soundness_check && GBgetUseGuards(model)) {
         for(int i=0;i<nGuards;i++) {
             guard_maybe[i] = vset_create(domain, g_projs[i].len, g_projs[i].proj);
         }
@@ -2296,6 +2361,7 @@ reach_chain(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
             vset_union(visited, temp);
             if (dlk_detect) {
                 vset_prev(dlk_temp, temp, group_next[i],deadlocks);
+                reduce(i, dlk_temp);
                 vset_minus(deadlocks, dlk_temp);
                 vset_clear(dlk_temp);
             }
@@ -2314,7 +2380,7 @@ reach_chain(vset_t visited, vset_t visited_old, bitvector_t *reach_groups,
         vset_destroy(deadlocks);
         vset_destroy(dlk_temp);
     }
-    if(!no_soundness_check) {
+    if(!no_soundness_check && GBgetUseGuards(model)) {
         for(int i=0;i<nGuards;i++) {
             vset_destroy(guard_maybe[i]);
         }
@@ -2368,6 +2434,7 @@ reach_sat_fix(reach_proc_t reach_proc, vset_t visited,
         if (dlk_detect) {
             for (int i = 0; i < nGrps; i++) {
                 vset_prev(dlk_temp, visited, group_next[i],deadlocks);
+                reduce(i, dlk_temp);
                 vset_minus(deadlocks, dlk_temp);
                 vset_clear(dlk_temp);
             }
@@ -2578,6 +2645,7 @@ reach_sat(reach_proc_t reach_proc, vset_t visited,
         vset_copy(deadlocks, visited);
         for (int i = 0; i < nGrps; i++) {
             vset_prev(dlk_temp, visited, group_next[i],deadlocks);
+            reduce(i, dlk_temp);
             vset_minus(deadlocks, dlk_temp);
             vset_clear(dlk_temp);
         }
@@ -2783,6 +2851,37 @@ do_output(char *etf_output, vset_t visited)
 
     if (tbl_file == NULL)
         AbortCall("could not open %s", etf_output);
+
+    if (vdom_separates_rw(domain)) {
+        /*
+         * This part is necessary because the ETF format does not yet support
+         * read, write and copy. This part should thus be removed when ETF is
+         * extended.
+         */
+        Warning(info, "Note: ETF format does not yet support read, write and copy.");
+        GBsetExpandMatrix(model, GBgetDMInfo(model));
+        GBsetProjectMatrix(model, GBgetDMInfo(model));
+
+        for (int i = 0; i < nGrps; i++) {
+            vset_destroy(group_explored[i]);
+
+            RTfree(r_projs[i].proj);
+            r_projs[i].len   = dm_ones_in_row(GBgetDMInfo(model), i);
+            r_projs[i].proj  = (int*)RTmalloc(r_projs[i].len * sizeof(int));
+            RTfree(w_projs[i].proj);
+            w_projs[i].len   = dm_ones_in_row(GBgetDMInfo(model), i);
+            w_projs[i].proj  = (int*)RTmalloc(w_projs[i].len * sizeof(int));
+
+            for(int j = 0, k = 0; j < dm_ncols(GBgetDMInfo(model)); j++) {
+                if (dm_is_set(GBgetDMInfo(model), i, j)) {
+                    r_projs[i].proj[k] = j;
+                    w_projs[i].proj[k++] = j;
+                }
+            }
+            group_explored[i] = vset_create(domain,r_projs[i].len,r_projs[i].proj);
+            vset_project(group_explored[i], visited);
+        }
+    }
 
     output_init(tbl_file);
     output_trans(tbl_file);
@@ -3004,11 +3103,12 @@ init_model(char **files, int file_count)
 }
 
 static void
-init_domain(vset_implementation_t impl)
-{
+init_domain(vset_implementation_t impl) {
     domain = vdom_create_domain(N, impl);
-
+    if (HREme(HREglobal())==0) vdom_init_universe(domain);
     for (int i = 0; i < dm_ncols(GBgetDMInfo(model)); i++) {
+
+        Warning(info, "State name: %d", i);
         vdom_set_name(domain, i, lts_type_get_state_name(ltstype, i));
     }
 
@@ -3184,6 +3284,7 @@ mu_compute (ltsmin_expr_t mu_expr, vset_t visited)
 
             for(int i=0;i<nGrps;i++){
                 vset_prev(temp,g,group_next[i],visited);
+                reduce(i, temp);
                 vset_union(result,temp);
                 vset_clear(temp);
             }
@@ -3226,6 +3327,7 @@ mu_compute (ltsmin_expr_t mu_expr, vset_t visited)
             // EX !phi
             for(int i=0;i<nGrps;i++){
                 vset_prev(temp,notphi,group_next[i],visited);
+                reduce(i, temp);
                 vset_union(prev,temp);
                 vset_clear(temp);
             }
@@ -3744,6 +3846,7 @@ actual_main(void)
         if (f == 0) Abort("Cannot open '%s' for reading!", transitions_load_filename);
 
         domain = vdom_create_domain_from_file(f, vset_impl);
+        if (HREme(HREglobal())==0) vdom_init_universe(domain);
 
         /* Call hook */
         vset_pre_load(f, domain);
@@ -4060,9 +4163,14 @@ actual_main(void)
             if (pgsolve_flag) {
                 spgsolver_options* spg_options = spg_get_solver_options();
                 rt_timer_t pgsolve_timer = RTcreateTimer();
-                Print(info, "Solving symbolic partity game.");
+                Print(info, "Solving symbolic parity game for player %d.", spg_options->player);
                 RTstartTimer(pgsolve_timer);
-                bool result = spg_solve(g, spg_options);
+                recursive_result strategy;
+                parity_game* copy = NULL;
+                if (spg_options->check_strategy) {
+                    copy = spg_copy(g);
+                }
+                bool result = spg_solve(g, &strategy, spg_options);
                 Print(info, " ");
                 Print(info, "The result is: %s.", result ? "true":"false");
                 RTstopTimer(pgsolve_timer);
@@ -4070,6 +4178,17 @@ actual_main(void)
                 RTprintTimer(info, timer,               "reachability took   ");
                 RTprintTimer(info, compute_pg_timer,    "computing game took ");
                 RTprintTimer(info, pgsolve_timer,       "solving took        ");
+                if (spg_options->strategy_filename != NULL)
+                {
+                    Print(info, "Writing winning strategies to %s", spg_options->strategy_filename);
+                    FILE* f = fopen(spg_options->strategy_filename, "w");
+                    result_save(f, strategy);
+                    fclose(f);
+                }
+                if (spg_options->check_strategy)
+                {
+                    check_strategy(copy, &strategy, spg_options->player, result, 10);
+                }
             } else {
                 spg_destroy(g);
             }
@@ -4161,7 +4280,7 @@ main (int argc, char *argv[])
             Print(info, "%zu slave processes started.", n_workers);
         }
         ctx = HREglobal();
-        lace_startup(0, TASK(actual_main), 0);
+        lace_startup(lace_stacksize, TASK(actual_main), 0);
         Print(infoLong, "Main done.");
     } else {
         ctx = HREglobal();

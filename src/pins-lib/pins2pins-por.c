@@ -17,6 +17,7 @@
 #include <util-lib/util.h>
 
 
+int NO_L12 = 0;
 static int NO_COMMUTES = 0;
 static int NO_HEUR = 0;
 static int MAX_BEAM = -1;
@@ -27,9 +28,9 @@ static int NO_NDS = 0;
 static int NO_MDS = 0;
 static int NO_MCNDS = 0;
 static int NO_MC = 0;
+static int USE_MC = 0;
 static int NO_DYN_VIS = 0;
 static int NO_V = 0;
-static int NO_L12 = 0;
 static int PREFER_NDS = 0;
 static int RANDOM = 0;
 static const char *algorithm = "heur";
@@ -59,6 +60,8 @@ typedef enum {
     POR_DEL,
     POR_SCC,
     POR_SCC1,
+    POR_AMPLE,
+    POR_AMPLE1,
 } por_alg_t;
 
 static por_alg_t alg = -1;
@@ -70,6 +73,8 @@ static si_map_entry por_algorithm[]={
     {"del",     POR_DEL},
     {"scc",     POR_SCC},
     {"scc1",    POR_SCC1},
+    {"ample",   POR_AMPLE},
+    {"ample1",  POR_AMPLE1},
     {NULL, 0}
 };
 
@@ -127,6 +132,7 @@ struct poptOption por_options[]={
     { "no-mds" , 0, POPT_ARG_VAL | POPT_ARGFLAG_DOC_HIDDEN , &NO_MDS , 1 , "without MDS" , NULL },
     { "no-nds" , 0, POPT_ARG_VAL | POPT_ARGFLAG_DOC_HIDDEN , &NO_NDS , 1 , "without NDS (for dynamic label info)" , NULL },
     { "no-mc" , 0, POPT_ARG_VAL | POPT_ARGFLAG_DOC_HIDDEN , &NO_MC , 1 , "without MC" , NULL },
+    { "use-mc" , 0, POPT_ARG_VAL | POPT_ARGFLAG_DOC_HIDDEN , &USE_MC , 1 , "Use MC to reduce search path" , NULL },
     { "no-mcnds" , 0, POPT_ARG_VAL | POPT_ARGFLAG_DOC_HIDDEN , &NO_MCNDS , 1 , "Do not create NESs from MC and NDS" , NULL },
     { "no-dynamic-labels" , 0, POPT_ARG_VAL | POPT_ARGFLAG_DOC_HIDDEN , &NO_DYN_VIS , 1 , "without dynamic visibility" , NULL },
     { "no-V" , 0, POPT_ARG_VAL | POPT_ARGFLAG_DOC_HIDDEN , &NO_V , 1 , "without V proviso, instead use Peled's visibility proviso, or V'     " , NULL },
@@ -211,7 +217,11 @@ init_visible_labels (por_context* ctx)
         Print1 (info, "Turning off dynamic visibility in presence of visible groups");
         NO_DYN_VIS = 1;
     }
-    SAFETY = bms_count(ctx->visible, VISIBLE) != 0;
+    if (!NO_DYN_VIS && (alg == POR_AMPLE || alg == POR_AMPLE1)) {
+        Print1 (info, "Turning off dynamic visibility for ample-set algorithm.");
+        NO_DYN_VIS = 1;
+    }
+    SAFETY = bms_count(ctx->visible, VISIBLE) != 0 || NO_L12;
 }
 
 static void
@@ -353,6 +363,7 @@ update_ns_scores (por_context* ctx, search_context_t *s, int group)
         // note: this selects some nesses that aren't used, but take the extra work
         // instead of accessing the guards to verify the work
         s->nes_score[ns] -= ctx->group_score[group];
+        HRE_ASSERT (s->nes_score[ns] >= 0, "FAILURE! NS: %s%d, group: %d", ns < ctx->nguards ? "+" : "-", ns, group);
     }
 }
 
@@ -420,7 +431,18 @@ void hook_cb (void *context, transition_info_t *ti, int *dst, int *cpy) {
 }
 
 static inline int
-emit_new_selected (por_context *ctx, ci_list *list, proviso_t *provctx, int *src)
+emit_all (por_context *ctx, ci_list *list, proviso_t *provctx, int *src)
+{
+    int c = 0;
+    for (int z = 0; z < list->count; z++) {
+        int i = list->data[z];
+        c += GBgetTransitionsLong (ctx->parent, i, src, hook_cb, provctx);
+    }
+    return c;
+}
+
+static inline int
+emit_new (por_context *ctx, ci_list *list, proviso_t *provctx, int *src)
 {
     beam_t             *beam = (beam_t *) ctx->beam_ctx;
     search_context_t   *s = beam->search[0];
@@ -467,7 +489,7 @@ beam_cheapest_ns (por_context* ctx, search_context_t *s, int group, int *cost)
 
 static inline bool
 select_all (por_context* ctx, search_context_t *s, ci_list *list,
-                    bool update_scores)
+            bool update_scores)
 {
     bool added_new = false;
     for (int i = 0; i < list->count; i++) {
@@ -493,6 +515,27 @@ static void
 beam_add_all_for_enabled (por_context *ctx, search_context_t *s, int group,
                           bool update_scores)
 {
+
+    if (POR_WEAK == WEAK_NONE && USE_MC) {
+        // include all never coenabled transitions without searching from them!
+
+        for (int i = 0; i < ctx->group_nce[group]->count; i++) {
+            int nce = ctx->group_nce[group]->data[i];
+            HREassert (ctx->group_status[nce] & GS_DISABLED, "Error in maybe-coenabled relation: %d - %d are coenabled.", group, nce);
+
+            if (s->emit_status[nce] & ES_READY) continue;
+            if (s->emit_status[nce] & ES_SELECTED) {
+                s->emit_status[nce] |= ES_READY; // skip in search
+                continue;
+            }
+
+            if (!NO_HEUR)
+                update_ns_scores (ctx, s, nce);
+            s->score_disabled += 1;
+            s->score_visible += is_visible (ctx, nce);
+        }
+    }
+
     // V proviso only for LTL
     if ((PINS_LTL || SAFETY) && is_visible(ctx, group)) {
         if (NO_V) { // Use Peled's stronger visibility proviso:
@@ -830,37 +873,34 @@ beam_emit (por_context* ctx, int* src, TransitionCB cb, void* uctx)
     if (s->enabled->count >= ctx->enabled_list->count) {
         // return all enabled
         proviso_t provctx = {cb, uctx, 0, 0, 1};
-        for (int i = 0; i < ctx->enabled_list->count; i++) {
-            int group = ctx->enabled_list->data[i];
-            emitted += GBgetTransitionsLong(ctx->parent, group, src, hook_cb, &provctx);
-        }
+        emitted = emit_all (ctx, s->enabled, &provctx, src);
     } else if (!PINS_LTL && !SAFETY) { // deadlocks are easy:
         proviso_t provctx = {cb, uctx, 0, 0, 1};
-        emitted = emit_new_selected (ctx, s->enabled, &provctx, src);
+        emitted = emit_new (ctx, s->enabled, &provctx, src);
     } else { // otherwise enforce that all por_proviso flags are true
         proviso_t provctx = {cb, uctx, 0, 0, 0};
 
         search_context_t   *s = beam->search[0];
         provctx.force_proviso_true = !NO_L12 && !NO_V && check_L2_proviso(ctx, s);
-        emitted = emit_new_selected (ctx, s->enabled, &provctx, src);
+        emitted = emit_new (ctx, s->enabled, &provctx, src);
 
         // emit more if we need to fulfill a liveness / safety proviso
         if ( ( PINS_LTL && provctx.por_proviso_false_cnt != 0) ||
              (!PINS_LTL && provctx.por_proviso_true_cnt  == 0) ) {
 
-            provctx.force_proviso_true = 3;
+            provctx.force_proviso_true = 1;
             Debugf ("BEAM %d may cause ignoring\n", s->idx);
             if (!NO_L12 && !NO_V && ctx->visible_enabled < ctx->enabled_list->count - 1) {
                 // enforce L2 (include all visible transitions)
                 beam_enforce_L2 (ctx);
                 if (beam->search[0]->enabled->count == ctx->enabled_list->count) {
-                    emitted += emit_new_selected (ctx, ctx->enabled_list, &provctx, src);
+                    emitted += emit_new (ctx, ctx->enabled_list, &provctx, src);
                 } else {
-                    emitted += emit_new_selected (ctx, s->enabled, &provctx, src);
+                    emitted += emit_new (ctx, s->enabled, &provctx, src);
                 }
             } else {
                 Debugf ("BEAM %d emitting all\n", s->idx);
-                emitted += emit_new_selected (ctx, ctx->enabled_list, &provctx, src);
+                emitted += emit_new (ctx, ctx->enabled_list, &provctx, src);
             }
         }
     }
@@ -1734,6 +1774,160 @@ create_beam_context (por_context *ctx)
 }
 
 /**
+ * Ample-set search
+ */
+
+typedef struct process_s {
+    int                 first_group;
+    int                 last_group;
+    ci_list            *enabled;
+} process_t;
+
+typedef struct ample_ctx_s {
+    size_t              num_procs;
+    process_t          *procs;
+} ample_ctx_t;
+
+static inline size_t
+ample_emit (por_context *ctx, ci_list *list, int *src, proviso_t *provctx)
+{
+    size_t emitted = 0;
+    for (int j = 0; j < list->count; j++) {
+        int group = list->data[j];
+        emitted += GBgetTransitionsLong (ctx->parent, group, src, hook_cb, provctx);
+    }
+    return emitted;
+}
+
+static int
+ample_one (model_t self, int *src, TransitionCB cb, void *uctx)
+{
+    por_context *ctx = ((por_context *)GBgetContext(self));
+
+    ample_ctx_t *ample = (ample_ctx_t *)ctx->ample_ctx;
+    por_init_transitions (ctx->parent, ctx, src);
+
+    size_t              p = 0;
+    process_t          *proc = &ample->procs[p];
+    ci_clear (proc->enabled);
+    for (int i = 0; i < ctx->enabled_list->count; i++) {
+        int             group = ctx->enabled_list->data[i];
+        if (proc->last_group < group) {
+            proc = &ample->procs[++p];
+            ci_clear (proc->enabled);
+        }
+        ci_add (proc->enabled, group);
+    }
+    HREassert (p <= ample->num_procs);
+
+    proviso_t provctx = {cb, uctx, 0, 0, 0};
+    for (size_t p = 0; p < ample->num_procs; p++) {
+        process_t          *proc = &ample->procs[p];
+
+        bool                emit_p = true;
+        for (int j = 0; j < proc->enabled->count && emit_p; j++) {
+            int group = proc->enabled->data[j];
+
+            if (ctx->visible->set[group])
+                emit_p = false;
+            for (int j = 0; j < ctx->not_accords[group]->count && emit_p; j++) {
+                int dep = ctx->not_accords[group]->data[j];
+                if (dep < proc->first_group || dep > proc->last_group ) {
+                    emit_p = false;
+                }
+            }
+        }
+
+        if (emit_p) {
+            size_t              emitted = 0;
+            emitted += ample_emit (ctx, proc->enabled, src, &provctx);
+
+            // emit more if ignoring proviso is violated
+            if ( ( PINS_LTL && provctx.por_proviso_false_cnt != 0) ||
+                 (!PINS_LTL && provctx.por_proviso_true_cnt  == 0) ) {
+                provctx.force_proviso_true = 1;
+                for (size_t o = 0; o < ample->num_procs; o++) {
+                    process_t          *other = &ample->procs[o];
+                    if (other == proc) continue; // already emitted
+                    emitted += ample_emit (ctx, other->enabled, src, &provctx);
+                }
+            }
+            return emitted;
+        }
+    }
+
+    provctx.force_proviso_true = 1;
+    return ample_emit (ctx, ctx->enabled_list, src, &provctx);
+}
+
+
+static ample_ctx_t *
+create_ample_ctx (por_context *ctx)
+{
+    ample_ctx_t *ample = RTmalloc(sizeof(ample_ctx_t));
+    ample->procs = RTmalloc(sizeof(process_t[ctx->ngroups])); // enough
+
+    matrix_t group_deps;
+    matrix_t *deps = GBgetDMInfo (ctx->parent);
+    dm_create(&group_deps, ctx->ngroups, ctx->ngroups);
+    for (int i = 0; i < ctx->ngroups; i++) {
+        for (int j = 0; j < ctx->nslots; j++) {
+            if (dm_is_set(deps, i, j)) {
+                for (int h = 0; h <= i; h++) {
+                    if (dm_is_set(deps, h, j)) {
+                        dm_set (&group_deps, i, h);
+                        dm_set (&group_deps, h, i);
+                    }
+                }
+            }
+        }
+    }
+    if (log_active(infoLong) && HREme(HREglobal()) == 0) dm_print (stdout, &group_deps);
+
+    // find processes:
+    size_t pbegin = 0;
+    ample->num_procs = 0;
+    for (int i = pbegin; i <= ctx->ngroups; i++) {
+        size_t num_set = 0;
+        if (i != ctx->ngroups) {
+            HREassert (dm_is_set(&group_deps, i, i), "Cannot detect processes for ample set POR in incomplete gorup/slot dependency matrix (diagonal not set in derived group/group relation).");
+            for (int j = pbegin; j <= i; j++) {
+                num_set += dm_is_set(&group_deps, i, j);
+            }
+        }
+        if (num_set < (i - pbegin + 1) / 2) { // heuristic
+            // end of process
+            size_t pend = i - 1;
+            ample->procs[ample->num_procs].first_group = pbegin;
+            ample->procs[ample->num_procs].last_group = pend;
+            ample->num_procs++;
+            Print1 (info, "Ample: Process %zu, starts from group %zu and ends with group %zu.", ample->num_procs, pbegin, pend);
+
+            // remove dependencies with other groups to avoid confusion in detection
+            for (size_t j = pbegin; j <= pend; j++) {
+                for (int h = 0; h < ctx->ngroups; h++) {
+                    dm_unset (&group_deps, j, h);
+                    dm_unset (&group_deps, h, j);
+                }
+            }
+            pbegin = pend + 1;
+        }
+    }
+
+    for (size_t i = 0; i < ample->num_procs; i++) {
+        process_t          *proc = &ample->procs[i];
+        proc->enabled = ci_create (proc->last_group - proc->first_group + 1);
+    }
+
+    if (!dm_is_empty(&group_deps) && HREme(HREglobal()) == 0) {
+        dm_print (stdout, &group_deps);
+        Abort ("Ample set heuristic for process identification failed, please verify the results with --labels.")
+    }
+
+    return ample;
+}
+
+/**
  * Default functions for long and short
  * Note: these functions don't work for partial order reduction,
  *       because partial order reduction selects a subset of the transition
@@ -1763,6 +1957,18 @@ guard_of (por_context *ctx, int i, matrix_t *m, int j)
         }
     }
     return false;
+}
+
+static inline bool
+all_guards (por_context *ctx, int i, matrix_t *m, int j)
+{
+    for (int g = 0; g < ctx->group2guard[i]->count; g++) {
+        int guard = ctx->group2guard[i]->data[g];
+        if (!dm_is_set (m, guard, j)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /**
@@ -1963,6 +2169,7 @@ GBaddPOR (model_t model)
             }
         }
         ctx->guard_nce             = (ci_list **) dm_rows_to_idx_table(&ctx->gnce_matrix);
+        ctx->group_nce             = (ci_list **) dm_rows_to_idx_table(&ctx->nce);
     }
 
     // extract accords with matrix
@@ -2031,9 +2238,40 @@ GBaddPOR (model_t model)
         id = GBgetMatrixID(model, LTSMIN_MUST_ENABLE_MATRIX);
         if (id != SI_INDEX_FAILED) {
             must_enable = GBgetMatrix(model, id);
-        } else if (POR_WEAK == 2) {
+        } else if (POR_WEAK == WEAK_VALMARI) {
             Print1 (info, "No must-enable matrix available for Valmari's weak sets.");
         }
+
+        /**
+         *
+         * WEAK relations
+         *
+         *  Guard-based POR (Journal):
+         *
+         *           j                    j
+         *      s —------>s1         s ------->s1
+         *                 |         |         |
+         *                 | i  ==>  |         | i
+         *                 |         |         |
+         *                 v         v         v
+         *                s1’        s’------>s1'
+         *
+         *  Valmari's weak definition (requires algorithmic changes):
+         *
+         *           j                    j
+         *      s —------>s1         s ------>s1
+         *      |          |         |         |
+         *      |          | i  ==>  |         | i
+         *      |          |         |         |
+         *      v          v         v         v
+         *      s'        s1’        s’------>s1'
+         *
+         *
+         * Combine DNA / Commutes with must_disable and may enable
+         *
+         * (may enable is inverse of NES)
+         *
+         */
 
         matrix_t not_left_accords;
         dm_create(&not_left_accords, ctx->ngroups, ctx->ngroups);
@@ -2041,28 +2279,44 @@ GBaddPOR (model_t model)
             for (int j = 0; j < ctx->ngroups; j++) {
                 if (i == j) continue;
 
-                if (!NO_MDS && guard_of(ctx, i, must_disable, j)) {
+                // j may disable i (OK)
+                if (!NO_MDS && all_guards(ctx, i, must_disable, j)) {
                     continue;
                 }
 
                 if (POR_WEAK == WEAK_VALMARI) {
-                    if (must_enable!= NULL && guard_of(ctx, i, must_enable, j)) {
+                    // j must enable i (OK)
+                    if (must_enable != NULL && all_guards(ctx, i, must_enable, j)) {
                         continue;
                     }
 
+                    // i and j are never coenabled (OK)
                     if ( !NO_MC && dm_is_set(&ctx->nce, i , j) ) {
-                        continue; // transitions never coenabled!
+                        continue;
                     }
                 } else {
-                    if (guard_of(ctx, i, &ctx->label_nes_matrix, j) || dm_is_set(&nds, j, i)) {
+                    // j may enable i (NOK)
+                    if (guard_of(ctx, i, &ctx->label_nes_matrix, j)) {
                         dm_set( &not_left_accords, i, j );
                         continue;
                     }
                 }
 
                 if (NO_COMMUTES) {
+                    // !DNA (OK)
                     if (!dm_is_set(&ctx->not_accords_with, i, j)) continue;
                 } else {
+                    // i may disable j (NOK)
+                    if (dm_is_set(&nds, j, i)) {
+                        dm_set( &not_left_accords, i, j );
+                        continue;
+                    }
+                    // i may enable j (NOK)
+                    if (guard_of(ctx, j, &ctx->label_nes_matrix, i)) {
+                        dm_set( &not_left_accords, i, j );
+                        continue;
+                    }
+                    // i,j commute (OK)
                     if ( dm_is_set(commutes, i , j) ) continue;
                 }
 
@@ -2156,8 +2410,10 @@ GBaddPOR (model_t model)
     switch (alg) {
     case POR_SCC:
     case POR_SCC1: GBsetNextStateAll   (pormodel, por_scc_all);  break;
+    case POR_AMPLE:GBsetNextStateAll   (pormodel, ample_one); break;
+    case POR_AMPLE1:GBsetNextStateAll   (pormodel, ample_one); break;
     case POR_HEUR: GBsetNextStateAll   (pormodel, por_beam_search_all); break;
-    case POR_DEL:  GBsetNextStateAll   (pormodel, por_deletion_all);     break;
+    case POR_DEL:  GBsetNextStateAll   (pormodel, por_deletion_all);    break;
     default: Abort ("Unknown POR algorithm: '%s'", key_search(por_algorithm, alg));
     }
 
@@ -2193,6 +2449,9 @@ GBaddPOR (model_t model)
     ctx->beam_ctx  = create_beam_context (ctx);
     ctx->scc_ctx = create_scc_ctx (ctx);
     ctx->del_ctx = deletion_create (ctx);
+    if (alg == POR_AMPLE || alg == POR_AMPLE1) {
+        ctx->ample_ctx = create_ample_ctx (ctx);
+    }
 
     return pormodel;
 }

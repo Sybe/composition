@@ -1,7 +1,37 @@
 /**
  * o Parallel NDFS algorithm by Evangelista/Pettruci/Youcef (ENDFS)
+
  * o Improved (Combination) NDFS algorithm (CNDFS).
-     <Submitted to ATVA 2012>
+    @inproceedings{cndfs,
+     Author = {Sami Evangelista and Alfons. W. Laarman and Laure Petrucci and van de Pol, Jaco C.},
+     Booktitle = {ATVA 2012},
+     Editor = {S. {Ramesh}},
+     doi = {10.1007/978-3-642-33386-6_22},
+     Isbn_13 = {978-3-642-33386-6},
+     Pages = {269--283},
+     Publisher = {Springer},
+     Series = {LNCS},
+     Title = {{Improved Multi-Core Nested Depth-First Search}},
+     Volume = {7561},
+     Year = {2012}
+    }
+
+ * o Partial-order reduction for CNDFS is described in:
+    @incollection{cycleproviso,
+     year={2014},
+     isbn={978-3-319-13337-9},
+     booktitle={HVC 2014},
+     volume={8855},
+     series={LNCS},
+     editor={Yahav, Eran},
+     doi={10.1007/978-3-319-13338-6_20},
+     title={Partial-Order Reduction for Multi-core LTL Model Checking},
+     url={http://dx.doi.org/10.1007/978-3-319-13338-6_20},
+     publisher={Springer},
+     author={Laarman, Alfons W. and Wijs, Anton J.},
+     pages={267-283},
+    }
+
  * o Combination of ENDFS and LNDFS (NMCNDFS)
      @inproceedings{pdmc11,
        month = {July},

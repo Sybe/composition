@@ -13,13 +13,21 @@ set LTSMIN_SRCDIR "[makeAbsolute $srcdir]/.."
 # The directory containing all the models used for testing.
 set EXAMPLES_PATH "$LTSMIN_SRCDIR/examples"
 
-# filter: filter a specific (list of) backend(s): {mc,sym,seq}
+# filter: filter a specific (list of) backend(s): {mc,sym,seq,dist}
 proc find_alg_backends { filter } {
     global base_dir
     set backends [list]
     set lts_backends [glob -directory "$base_dir/../src" -type d pins2lts-$filter ]
     foreach dir $lts_backends {
         set lts_bins [glob -nocomplain -directory $dir -type f *2lts-$filter ]
+        foreach path $lts_bins {
+            lappend backends $path
+        }
+        set lts_bins [glob -nocomplain -directory $dir/gcc -type f *2lts-$filter ]
+        foreach path $lts_bins {
+            lappend backends $path
+        }
+        set lts_bins [glob -nocomplain -directory $dir/mpicc -type f *2lts-$filter ]
         foreach path $lts_bins {
             lappend backends $path
         }
@@ -79,17 +87,65 @@ proc runmytest { test_name command_line exp_output} {
         }
 	    
         "unimplemented combination --strategy=bfs, --state=table" {
-	    xfail "unimplemented combination --strategy=bfs, --state=table";
-	    catch { exp_close }
-	    return
-	}
+    	    xfail "unimplemented combination --strategy=bfs, --state=table";
+    	    catch { exp_close }
+    	    return
+	    }
 
         "Decision diagram package does not support least fixpoint" {
-	    xfail "Decision diagram package does not support least fixpoint";
-	    catch { exp_close }
-	    return
+    	    xfail "Decision diagram package does not support least fixpoint";
+    	    catch { exp_close }
+    	    return
         }
-
+        
+        "SCC search only works in combination with an accepting state label" {
+            xfail "SCC search only works in combination with an accepting state label";
+            catch { exp_close }
+            return
+        }
+        
+        "BCG support was not enabled at compile time." {
+            xfail "BCG support was not enabled at compile time."
+            catch { exp_close }
+            return
+        }
+        
+        "cannot write state labels to AUT file" {
+            xfail "cannot write state labels to AUT file"
+            catch { exp_close }
+            return
+        }
+        
+        "Vector set implementation does not support vset_join operation." {
+            xfail "Vector set implementation does not support vset_join operation."
+            catch { exp_close }
+            return
+        }
+        
+        "guard-splitting not supported with saturation=" {
+            xfail "guard-splitting not supported with saturation="
+            catch { exp_close }
+            return
+        }
+        
+        "No long next-state function implemented for this language module (--pins-guards)." {
+            xfail "No long next-state function implemented for this language module (--pins-guards)."
+            catch { exp_close }
+            return
+        }
+        
+        "Cannot apply branching bisimulation to an LTS with state labels." {
+            xfail "Cannot apply branching bisimulation to an LTS with state labels."
+            catch { exp_close }
+            return
+        }
+        
+        "Cleary tree not supported in combination with error trails or the MCNDFS algorithms." {
+            xfail "Cleary tree not supported in combination with error trails or the MCNDFS algorithms."
+            catch { exp_close }
+            return
+        }
+        
         # Check for any warning messages in the output first
         Warning {
             fail "$test_name: warning: $expect_out(buffer)"

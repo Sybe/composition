@@ -30,8 +30,8 @@ CLEANFILES += brp.pbes
 CLEANFILES += ieee-11073.lps
 
 %.lps: %.mcrl2
-	mcrl22lps $< $@
+	$(MCRL2) -nDf $< $@
 
 %.pbes: %.lps
-	lps2pbes -f nodeadlock.mu $< $@
+	$(PBES) -f nodeadlock.mu $< $@
     
