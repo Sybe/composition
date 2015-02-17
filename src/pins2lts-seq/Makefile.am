@@ -19,7 +19,6 @@ endif
 
 if HAVE_LIBMCRL2
 bin_PROGRAMS += lps2lts-seq
-bin_PROGRAMS += lpslps2lts-seq
 endif
 
 if HAVE_LIBPBES
@@ -33,6 +32,8 @@ endif
 if HAVE_SPINS
 bin_PROGRAMS += prom2lts-seq
 endif
+
+#bin_PROGRAMS += mapa2lts-seq
 
 # pins2lts-seq
 pins2lts_seq_SOURCES   = pins2lts-seq.c
@@ -70,14 +71,6 @@ lps2lts_seq_CPPFLAGS  = -DMCRL2 $(SEQ_CPPFLAGS)
 lps2lts_seq_LDFLAGS   = $(MCRL2_LDFLAGS) $(AM_LDFLAGS)
 nodist_EXTRA_lps2lts_seq_SOURCES = automake-force-linker.cxx #req. by mcrl2s
 
-# lpslps2lts-seq
-lpslps2lts_seq_SOURCES   = pinspins2lts-seq.c
-lpslps2lts_seq_LDADD     = $(HRE_LIB) $(PINS_LIBS)
-lpslps2lts_seq_LDADD    += $(VSET_LIBS) ../pins-lib/libmcrl2-pins.la
-lpslps2lts_seq_CPPFLAGS  = -DMCRL2 $(SEQ_CPPFLAGS)
-lpslps2lts_seq_LDFLAGS   = $(MCRL2_LDFLAGS) $(AM_LDFLAGS)
-nodist_EXTRA_lpslps2lts_seq_SOURCES = automake-force-linker.cxx #req. by mcrl2s
-
 # pbes2lts-seq
 pbes2lts_seq_SOURCES   = pins2lts-seq.c
 pbes2lts_seq_LDADD     = $(HRE_LIB) $(PINS_LIBS)
@@ -103,3 +96,13 @@ prom2lts_seq_LDADD   += $(VSET_LIBS) $(SPINS_LIBS)
 prom2lts_seq_CPPFLAGS = -DSPINS $(SPINS_CPPFLAGS) $(SEQ_CPPFLAGS)
 prom2lts_seq_LDFLAGS  = $(SPINS_LDFLAGS) $(AM_LDFLAGS)
 nodist_EXTRA_prom2lts_seq_SOURCES = automake-force-linker.cxx # req. by vset
+
+# mapa2lts-seq
+mapa2lts_seq_SOURCES   = pins2lts-seq.c
+mapa2lts_seq_LDADD     = $(HRE_LIB)
+mapa2lts_seq_LDADD    += ../pins-lib/libmapa-pins.la -lscoop
+mapa2lts_seq_LDADD    += $(PINS_LIBS) $(VSET_LIBS)
+mapa2lts_seq_LDFLAGS   = $(MAPA_LD_FLAGS) $AD_LDFLAGS
+mapa2lts_seq_CPPFLAGS  = -DMAPA $(SEQ_CPPFLAGS)
+nodist_EXTRA_mapa2lts_seq_SOURCES = automake-force-linker.cxx # req. by vset
+

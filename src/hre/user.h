@@ -96,7 +96,7 @@ This call will start the selected runtime. During the startup,
 the registered options will be parsed. It is up to the selected
 runtime exactly when options are parsed.
 */
-extern void HREinitStart(int *argc,char **argv[],int min_args,int max_args,char*args[],const char* arg_help);
+extern void HREinitStart(int *argc,char **argv[],int min_args,int max_args,char*args[],int *files,const char* arg_help);
 
 /**
 \brief Start the HRE environment.

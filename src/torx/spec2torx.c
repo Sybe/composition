@@ -41,6 +41,7 @@ static int          K;
 static int          state_labels;
 static int          edge_labels;
 static treedbs_t    dbs;
+static int          file_count;
 
 static void
 torx_transition (void *arg, transition_info_t *ti, int *dst, int *cpy)
@@ -132,7 +133,7 @@ main (int argc, char *argv[])
     HREinitBegin(argv[0]);
     HREaddOptions(options,"Run the TorX remote procedure call protocol on <model>.\n\nOtions");
     //lts_lib_setup(); // TODO
-    HREinitStart(&argc,&argv,1,1,files,"<model>");
+    HREinitStart(&argc,&argv,1,1,files,&file_count,"<model>");
 
     Warning (info, "loading model from %s", files[0]);
     model_t             model = GBcreateBase ();
@@ -142,7 +143,7 @@ main (int argc, char *argv[])
                        (chunkatint_t)SIputCAt,
                        (get_count_t)SIgetCount);
 
-    GBloadFile (model, files[0], &model);
+    GBloadFiles (model, files, file_count, &model);
 
     lts_type_t          ltstype = GBgetLTStype (model);
     N = lts_type_get_state_length (ltstype);

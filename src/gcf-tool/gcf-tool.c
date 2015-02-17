@@ -78,6 +78,7 @@ static string_map_t compression_policy=NULL;
 static string_map_t coding_policy=NULL;
 static char* outputdir=NULL;
 static int keep=0;
+static int file_count;
 
 static struct poptOption parameters[] = {
     { "force",'f' ,  POPT_ARG_VAL , &force , 1 , "force creation of a directory for output" , NULL },
@@ -377,7 +378,7 @@ static void zip_copy_gcf(){
 int main(int argc, char *argv[]){
     HREinitBegin(argv[0]);
     HREaddOptions(options,"Tool for creating and extracting GCF archives\n\nOperations");
-    HREinitStart(&argc,&argv,0,-1,NULL,"<operation> <arguments>");
+    HREinitStart(&argc,&argv,0,-1,NULL,&file_count,"<operation> <arguments>");
     compression_policy=SSMcreateSWP(gcf_policy);
     coding_policy=SSMcreateSWP(zip_policy);
     switch(operation){

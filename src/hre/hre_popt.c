@@ -63,7 +63,7 @@ char* HREnextArg(){
 }
 
 static int HREcallPopt(int argc,char*argv[],struct poptOption optionsTable[],
-                      int min_args,int max_args,char*args[],const char* arg_help){
+                      int min_args,int max_args,char*args[],int *files, const char* arg_help){
     optCon=poptGetContext(NULL, argc,(const char**)argv, optionsTable, 0);
     if (arg_help){
         snprintf(user_usage, sizeof user_usage, "[OPTIONS] %s",arg_help);
@@ -100,21 +100,26 @@ static int HREcallPopt(int argc,char*argv[],struct poptOption optionsTable[],
             Abort("option %s has unexpected return %d",poptBadOption(optCon,0),res);
         }
     }
+    *files = 0;
     for(int i=0;i<min_args;i++){
         args[i] = HREstrdup (poptGetArg (optCon));
+        *files+=1;
         if (!args[i]) {
             Print(error,"not enough arguments");
             HREprintUsage();
             return 1;
         }
+        printf("arg: %s\n", args[i]);
     }
     if (max_args >= min_args) {
-        for(int i=min_args;i<max_args;i++){
+        for(int i=min_args;i<max_args && i < argc;i++){
             if (poptPeekArg(optCon)){
                 args[i] = HREstrdup (poptGetArg (optCon));
+                *files+=1;
             } else {
                 args[i]=NULL;
             }
+            printf("arg: %s\n", args[i]);
         }
         if (poptPeekArg(optCon)!=NULL) {
             Print(error,"too many arguments");
@@ -139,9 +144,9 @@ void HREaddOptions(const struct poptOption *options,const char* header){
     }
 }
 
-int HREdoOptions(int argc,char *argv[],int min_args,int max_args,char*args[],const char* arg_help){
+int HREdoOptions(int argc,char *argv[],int min_args,int max_args,char*args[],int *files,const char* arg_help){
     HREaddOptions(runtime_options,NULL);
-    return HREcallPopt(argc,argv,option_group,min_args,max_args,args,arg_help);
+    return HREcallPopt(argc,argv,option_group,min_args,max_args,args,files,arg_help);
 }
 
 void RTparseOptions(const char* argline,int *argc_p,char***argv_p){

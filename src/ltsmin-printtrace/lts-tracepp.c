@@ -19,6 +19,7 @@ static char *arg_value="name";
 static enum { FF_TXT, FF_CSV } file_format = FF_TXT;
 static char *arg_sep=",";
 static enum { IDX, NAME } output_value = NAME;
+static int file_count;
 
 static si_map_entry output_values[] = {
     {"name",    NAME},
@@ -461,7 +462,7 @@ main(int argc,char*argv[]){
                 "  csv: Comma separated values\n\n"
                 "Options");
     lts_lib_setup();
-    HREinitStart(&argc,&argv,1,2,files,"<input> [<output>]");
+    HREinitStart(&argc,&argv,1,2,files,&file_count,"<input> [<output>]");
     // open file (--file argument or stdout in case of NULL)
     FILE* output_file = stdout;
     if (files[1]) {

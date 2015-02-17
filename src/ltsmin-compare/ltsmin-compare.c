@@ -12,6 +12,7 @@ typedef enum {Undefined=0,Strong,Branching,Trace,Lumping} task_t;
 static task_t task=Undefined;
 static int divergence_sensitive=0;
 static int stuttering=0;
+static int file_count;
 
 static void trace_compare(lts_t lts){
     if (stuttering){
@@ -53,7 +54,7 @@ int main(int argc, char *argv[]){
     HREaddOptions(options,"Tool for comparing LTSs\n\nOptions");
     char *files[2];
     lts_lib_setup();
-    HREinitStart(&argc,&argv,2,2,files,"<input 1> <input 2>");
+    HREinitStart(&argc,&argv,2,2,files,&file_count,"<input 1> <input 2>");
     if (task==Undefined){
         Abort("please specify equivalence");
     }

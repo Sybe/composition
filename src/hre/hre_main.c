@@ -212,7 +212,7 @@ void HREdisableSingle(){
     run_single=0;
 }
 
-void HREinitStart(int *argc,char **argv[],int min_args,int max_args,char*args[],const char* arg_help){
+void HREinitStart(int *argc,char **argv[],int min_args,int max_args,char*args[],int *files, const char* arg_help){
     struct thread_context *ctx=pthread_getspecific(hre_key);
     ctx->stack_bottom=(void*)argc; // ATerm library needs this.
     if (HREmainThread()){
@@ -278,7 +278,7 @@ void HREinitStart(int *argc,char **argv[],int min_args,int max_args,char*args[],
         Debug("parsing options");
         // parse options at worker 0.
         if (HREme(main_ctx)==0){
-            res=HREdoOptions(*argc,*argv,min_args,max_args,args,arg_help);
+            res=HREdoOptions(*argc,*argv,min_args,max_args,args,files,arg_help);
         } else {
             res=0;
         }
@@ -288,7 +288,7 @@ void HREinitStart(int *argc,char **argv[],int min_args,int max_args,char*args[],
         }
         // Parse at other workers.
         if (HREme(main_ctx)!=0){
-            res=HREdoOptions(*argc,*argv,min_args,max_args,args,arg_help);
+            res=HREdoOptions(*argc,*argv,min_args,max_args,args,files,arg_help);
             if (res) Abort("unexpected failure during option parsing");
         }
         // if necessary start threads.

@@ -44,7 +44,7 @@ extern hre_context_t HREmainGet();
 extern void HREprocessSet(hre_context_t context);
 
 /// Parse registered options.
-extern int HREdoOptions(int argc,char *argv[],int min_args,int max_args,char*args[],const char* arg_help);
+extern int HREdoOptions(int argc,char *argv[],int min_args,int max_args,char*args[],int *files,const char* arg_help);
 
 /// Get the name of the application.
 extern const char* HREappName();

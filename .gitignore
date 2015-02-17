@@ -33,3 +33,4 @@ include/
 /examples/brp.lps
 /examples/brp.pbes
 /examples/ieee-11073.lps
+/.dist-buildwrapper/

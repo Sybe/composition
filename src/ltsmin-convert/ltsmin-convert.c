@@ -16,6 +16,7 @@ static int rd_seg;
 static char* label_filter=NULL;
 static int encode=0;
 static int bfs_reorder=0;
+static int file_count;
 
 static  struct poptOption options[] = {
     { "copy" , 0 , POPT_ARG_VAL , &task , LTScopy ,
@@ -41,7 +42,7 @@ int main(int argc, char *argv[]){
     HREinitBegin(argv[0]);
     HREaddOptions(options,"Tool for transforming labeled transition systems\n\nOptions");
     lts_lib_setup();
-    HREinitStart(&argc,&argv,1,2,files,"<input> [<output>]");
+    HREinitStart(&argc,&argv,1,2,files,file_count,"<input> [<output>]");
     int me=HREme(HREglobal());
     int peers=HREpeers(HREglobal());
     if (peers>1) Abort("parallelizing this tool is future work");(void)me;

@@ -183,7 +183,7 @@ void prcrl_callback(void){
 //	int lbl=ATfindIndex(actionmap,label);
 //    transition_info_t ti = GB_TI(&lbl, -1);
     transition_info_t ti = GB_TI(cb_labels[model_nr], -1);
-    Warning(info, "to(%d,%d)", cb_dests[model_nr][0], cb_dests[model_nr][1]);
+//    Warning(info, "to(%d,%d)", cb_dests[model_nr][0], cb_dests[model_nr][1]);
 	user_cb(cb_ctx,&ti,cb_dests[model_nr],NULL);
 }
 
@@ -214,7 +214,7 @@ static int PRCRLgetTransitionsLong(model_t model,int group,int*src,TransitionCB 
     prcrl_context_t ctx=GBgetContext(model);
     cb_ctx=context;
     user_cb=cb;
-    Warning(info, "from(%d,%d)", src[0], src[1]);
+//    Warning(info, "from(%d,%d)", src[0], src[1]);
     int res=prcrl_explore_long(ctx->spec,group,src,cb_dests[model_nr],cb_labels[model_nr]);
     return res;
 }

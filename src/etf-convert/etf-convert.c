@@ -16,6 +16,7 @@ static char** pvar_name=NULL;
 static int*   pvar_idx=NULL;
 static int output_bytes=0;
 static int constelm=0;
+static int file_count;
 
 static  struct poptOption options[] = {
     { "pvars" , 0 , POPT_ARG_STRING , &pvars , 0 , "list of independent variables" , NULL },
@@ -592,7 +593,7 @@ int main(int argc,char *argv[]){
                           "etf Enumerated Table Format (read)\n"
                           "dve DiVinE input language (write)\n"
                           "dep DEPendencies of the model (write)\n");
-    HREinitStart(&argc,&argv,2,2,files,"<input> <output>");
+    HREinitStart(&argc,&argv,2,2,files,&file_count,"<input> <output>");
 	etf_model_t (*read_model)(const char *name)=NULL;
 	void (*write_model)(const char *name,etf_model_t model)=NULL;
 	int len;

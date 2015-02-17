@@ -1839,7 +1839,7 @@ int
 main (int argc, char *argv[])
 {
     const char *files[3];
-    files[2] = argv[3];
+    files[2] = argv[argc];
     argc--;
     HREinitBegin(argv[0]); // the organizer thread is called after the binary
     HREaddOptions(options,
@@ -1885,14 +1885,16 @@ main (int argc, char *argv[])
     Warning (info, "Finished composition");
 
     lts_type_t ltstype = GBgetLTStype(opt.model);
-    global.N = lts_type_get_state_length(ltstype);
+    lts_type_t ltstype1 = GBgetLTStype(opt.model1);
+    lts_type_t ltstype2 = GBgetLTStype(opt.model2);
+    global.N = lts_type_get_state_length(ltstype1) + lts_type_get_state_length(ltstype2);
 
     Warning (info, "Dependency matrix asked");
 
     global.K = dm_nrows(GBgetDMInfo(opt.model));
-    global.T = lts_type_get_type_count(ltstype);
-    global.state_labels = lts_type_get_state_label_count(ltstype);
-    global.edge_labels = lts_type_get_edge_label_count(ltstype);
+    global.T = lts_type_get_type_count(ltstype1) + lts_type_get_type_count(ltstype2);
+    global.state_labels = lts_type_get_state_label_count(ltstype1) + lts_type_get_state_label_count(ltstype2);
+    global.edge_labels = lts_type_get_edge_label_count(ltstype1) + lts_type_get_state_label_count(ltstype2);
 
     Warning (info, "Globals set");
     int src[global.N];
