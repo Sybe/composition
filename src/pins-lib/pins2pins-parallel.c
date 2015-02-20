@@ -81,6 +81,31 @@ combineMatrices(matrixCall mc, model_t *models, matrix_t *dst){
      }
 }
 
+combineSLMatrices(model_t *models, matrix_t *dst){
+    int columns[model_count];
+    int rows[model_count];
+    int columns_total = 0;
+    int rows_total = 0;
+    for(int i = 0; i < model_count; i++){
+        columns[i]      = dm_ncols(GBgetStateLabelInfo(models[i]));
+        rows[i]         = dm_nrows(GBgetStateLabelInfo(models[i]));
+        columns_total   += columns[i];
+        rows_total      += rows[i];
+    }
+    dm_create(dst, rows_total, columns[0]);
+    int rows_created = 0;
+    for(int i = 0; i < model_count; i++){
+        for(int j = 0; j < columns[0]; j++){
+            for(int k = 0; k < rows[i]; k++){
+                if(dm_is_set(GBgetStateLabelInfo(models[i]), k, j)){
+                    dm_set(dst, k + rows_created, j);
+                }
+            }
+        }
+       rows_created += rows[i];
+    }
+}
+
 void
 create_correct_groups(model_t model, char *file1, char *file2){
     FILE *f1 = fopen(file1, "r");
@@ -179,10 +204,11 @@ create_correct_groups(model_t model, char *file1, char *file2){
                 }
             } else {
                 int group_nr = i - dm_nrows(GBgetDMInfo(models[0])) - dm_nrows(GBgetDMInfo(models[1]));
-                int group1 = group_nr / dm_nrows(GBgetDMInfo(models[0]));
-                int group2 = group_nr % dm_nrows(GBgetDMInfo(models[0]));
+                int group1 = group_nr / dm_nrows(GBgetDMInfo(models[1]));
+                int group2 = group_nr % dm_nrows(GBgetDMInfo(models[1]));
                 if(types1[group1] != RATE && types1[group1] != TAU && types1[group1] == types2[group2] && strcmp(labels1[group1],labels2[group2]) == 0){
                     correct_groups[i] = 1;
+                    Warning(info, "label: %s", labels1[group1]);
                 } else {
                     correct_groups[i] = 0;
                 }
@@ -334,8 +360,7 @@ getTransitionsAll(model_t model,int*src,TransitionCB cb,void*context){
     return result;
 }*/
 
-
-//TODO uitbreiden voor synchronisatie
+/*
 int
 transitionInGroup(model_t m, int* labels, int group){
     int groups[model_count];
@@ -359,7 +384,7 @@ transitionInGroup(model_t m, int* labels, int group){
         label_count_counted += label_count[i];
     }
     return result;
-}
+}*/
 
 int
 matrices_present(matrixCall mc, model_t *models){
@@ -433,7 +458,7 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
         GBsetDoNotAccordInfo(composition, p_dm_project);
     }
     if(matrices_present(GBgetStateLabelInfo, models)){
-        combineMatrices(GBgetStateLabelInfo, models, p_dm_state_label);
+        combineSLMatrices(models, p_dm_state_label);
         GBsetStateLabelInfo(composition, p_dm_state_label);
     }
     if(matrices_present(GBgetCommutesInfo, models)){
@@ -452,6 +477,10 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
 
     create_correct_groups(composition, files[2], files[3]);
 
+    for (int i = 0; i < dm_nrows(GBgetDMInfo(composition)); i++){
+        printf("%d", correct_groups[i]);
+    }
+    printf("\n");
 
     //GBsetMatrix
     //Class matrix
@@ -476,7 +505,7 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
     }
     tot_columns_class += product_columns_class;
     if(class_matrix_needed){
-        static matrix_t p_dm_class;//          = RTmalloc(sizeof(matrix_t));
+        static matrix_t p_dm_class;
         dm_create(&p_dm_class, rows_class[0], tot_columns_class);
         int class_columns_counted = 0;
         for(int i = 0; i < model_count; i++){
@@ -500,20 +529,21 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
 
             }
         }
-/*
+
         FILE *original = fopen("original.txt", "w+");
-        FILE *composition = fopen("composition.txt", "w+");
-        dm_print(original, GBgetMatrix(models[0], id[0]));
-        dm_print(composition, &p_dm_class);
+        FILE *combination = fopen("composition.txt", "w+");
+        dm_print(original, GBgetStateLabelInfo(models[0]));
+        dm_print(combination, GBgetStateLabelInfo(composition));
         fclose(original);
-        fclose(composition);
-*/
+        fclose(combination);
+
+
         GBsetMatrix(composition,LTSMIN_EDGE_TYPE_ACTION_CLASS,&p_dm_class,PINS_STRICT,PINS_INDEX_OTHER,PINS_INDEX_GROUP);
     }
     //Inhibit matrix
     int inhibit_id = GBgetMatrixID(models[0], "inhibit");
     if(inhibit_id >= 0){
-        static matrix_t p_dm_inhibit ;//         = RTmalloc(sizeof(matrix_t));
+        static matrix_t p_dm_inhibit ;
         dm_create(&p_dm_inhibit, 3, 3);
         for(int i = 0; i < 3; i ++){
             for(int j = 0; j < 3; j++){
@@ -544,19 +574,36 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
     int edge_labels_counted = 0;
     int state_labels_counted = 0;
     for (int i = 0; i < model_count; i++){
+        char model_nr_str[2];
+        sprintf(model_nr_str, "%d", i);
         for (int j = 0; j < lts_type_get_state_length (GBgetLTStype(models[i])); j++){
-            lts_type_set_state_name(ltstype, j + state_length_counted, lts_type_get_state_name(GBgetLTStype(models[i]), j));
-            lts_type_set_state_type(ltstype, j + state_length_counted, lts_type_get_state_type(GBgetLTStype(models[i]), j));
+            char tmp[MAX_LABEL_LENGTH];
+            strcpy(tmp, lts_type_get_state_name(GBgetLTStype(models[i]), j));
+            strcat(strcat(tmp, "_"),model_nr_str);
+            lts_type_set_state_name(ltstype, j + state_length_counted, tmp);
+            strcpy(tmp, lts_type_get_state_type(GBgetLTStype(models[i]), j));
+            strcat(strcat(tmp, "_"),model_nr_str);
+            lts_type_set_state_type(ltstype, j + state_length_counted, tmp);
             lts_type_set_state_typeno(ltstype, j + state_length_counted, lts_type_get_state_typeno(GBgetLTStype(models[i]), j));
         }
         for (int j = 0; j < lts_type_get_edge_label_count (GBgetLTStype(models[i])); j++){
-            lts_type_set_edge_label_name(ltstype, j + edge_labels_counted, lts_type_get_edge_label_name(GBgetLTStype(models[i]), j));
-            lts_type_set_edge_label_type(ltstype, j + edge_labels_counted, lts_type_get_edge_label_type(GBgetLTStype(models[i]), j));
+            char tmp[MAX_LABEL_LENGTH];
+            strcpy(tmp, lts_type_get_edge_label_name(GBgetLTStype(models[i]), j));
+            strcat(strcat(tmp, "_"),model_nr_str);
+            lts_type_set_edge_label_name(ltstype, j + edge_labels_counted, tmp);
+            strcpy(tmp, lts_type_get_edge_label_type(GBgetLTStype(models[i]), j));
+            strcat(strcat(tmp, "_"),model_nr_str);
+            lts_type_set_edge_label_type(ltstype, j + edge_labels_counted, tmp);
             lts_type_set_edge_label_typeno(ltstype, j + edge_labels_counted, lts_type_get_edge_label_typeno(GBgetLTStype(models[i]), j));
         }
         for (int j = 0; j < lts_type_get_state_label_count (GBgetLTStype(models[i])); j++){
-            lts_type_set_state_label_name(ltstype, j + state_labels_counted, lts_type_get_state_label_name(GBgetLTStype(models[i]), j));
-            lts_type_set_state_label_type(ltstype, j + state_labels_counted, lts_type_get_state_label_type(GBgetLTStype(models[i]), j));
+            char tmp[MAX_LABEL_LENGTH];
+            strcpy(tmp, lts_type_get_state_label_name(GBgetLTStype(models[i]), j));
+            strcat(strcat(tmp, "_"),model_nr_str);
+            lts_type_set_state_label_name(ltstype, j + state_labels_counted, tmp);
+            strcpy(tmp, lts_type_get_state_label_type(GBgetLTStype(models[i]), j));
+            strcat(strcat(tmp, "_"),model_nr_str);
+            lts_type_set_state_label_type(ltstype, j + state_labels_counted, tmp);
             lts_type_set_state_label_typeno(ltstype, j + state_labels_counted, lts_type_get_state_label_typeno(GBgetLTStype(models[i]), j));
         }
         state_length_counted += lts_type_get_state_length (GBgetLTStype(models[i]));
@@ -565,6 +612,21 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
     }
 
     GBsetLTStype(composition, ltstype);
+
+    //todo chunks
+    /*
+    int types_counted = 0;
+    for(int i = i; i < model_count; i++){
+        for(int j = 0; j < lts_type_get_type_count(GBgetLTStype(models[i])); j++){
+            for(int k = 0; k < GBchunkCount(models[i], j); k++){
+                chunk c = GBchunkGet(models[i], j, k);
+                if(j < lts_type_get_state_length(GBgetLTStype(models[i]))){
+                    GBchunkPutAt(composition, j + types_counted, c, k);
+                }
+            }
+        }
+        types_counted += lts_type_get_type_count(GBgetLTStype(models[i]));
+    }*/
 
     int len_total = 0;
     int s0_total[lts_type_get_state_length(ltstype)];
@@ -590,9 +652,9 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
         GBsetSupportsCopy(composition);
     }
 
-//    GBsetNextStateAll(composition, getTransitionsAll); function is still incorrect
+//    GBsetNextStateAll(composition, getTransitionsAll);
     GBsetNextStateLong(composition, getTransitionsLong);
     GBsetStateLabelLong(composition, getStateLabelLong);
-    GBsetTransitionInGroup(composition, transitionInGroup);
+//    GBsetTransitionInGroup(composition, transitionInGroup);
 }
 

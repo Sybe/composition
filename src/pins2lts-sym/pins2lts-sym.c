@@ -2826,6 +2826,7 @@ output_types(FILE *tbl_file)
 
         int values = GBchunkCount(model,i);
 
+        Warning(info, "values: %d", values);
         for (int j = 0; j < values; j++) {
             chunk c    = GBchunkGet(model, i, j);
             size_t len = c.len * 2 + 6;
@@ -2884,9 +2885,13 @@ do_output(char *etf_output, vset_t visited)
     }
 
     output_init(tbl_file);
+    Warning(info, "init");
     output_trans(tbl_file);
+    Warning(info, "trans");
     output_lbls(tbl_file, visited);
+    Warning(info, "lbls");
     output_types(tbl_file);
+    Warning(info, "types");
 
     fclose(tbl_file);
     RTstopTimer(timer);
@@ -4140,7 +4145,7 @@ actual_main(void)
         }
     }
     if (file_count > 1 && (0 != strcmp(strrchr(files[0], '.'), strrchr(files[file_count - 1], '.')))){
-        do_output(files[file_count - 1], visited);//outputting files does not work yet
+        do_output(files[file_count - 1], visited);//outputting files does not work yet //TODO
     }
     if (spg) { // converting the LTS to a symbolic parity game, save and solve.
         vset_destroy(true_states);
