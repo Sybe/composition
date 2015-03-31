@@ -12,6 +12,7 @@
 static int check_confluence=0;
 static int enable_rewards=0;
 static int internal_max_progress=1;
+static int iomapa=1;
 
 static const char const_long[]="const";
 static const char progress_long[]="max-progress";
@@ -161,13 +162,15 @@ void write_reward_label(char *str,int*label){
 
 int action_get_index(char* val){
     int res=GBchunkPut(main_models[model_nr],action_types[model_nr],chunk_str(val));
+//    extra_chunks(action_types[model_nr],chunk_str(val));
 //    Warning(info,"get action index for %s : %d",val,res);
     return res;
 }
 
 int term_get_index(int pos,char* val){
     int res=GBchunkPut(main_models[model_nr],state_types[model_nr][pos],chunk_str(val));
-//    Warning(info,"get %d index (%d) for %s : %d",pos,state_type[pos],val,res);
+//    extra_chunks(action_types[model_nr],chunk_str(val));
+//    Warning(info,"get %d index (%d) for %s : %d",pos,state_types[model_nr][pos],val,res);
     return res;
 }
 
@@ -212,6 +215,7 @@ static int PRCRLdelegateTransitionsLong(model_t model,int group,int*src,Transiti
 
 static int PRCRLgetTransitionsLong(model_t model,int group,int*src,TransitionCB cb,void*context){
     prcrl_context_t ctx=GBgetContext(model);
+    model_nr = GBgetModelNr(model);
     cb_ctx=context;
     user_cb=cb;
 //    Warning(info, "from(%d,%d)", src[0], src[1]);
@@ -279,6 +283,13 @@ static void get_state_labels(model_t self,int*src,int *label){
     }
 }
 
+static int get_state_label(model_t self, int l, int *src) {
+    HREassert(l >=0 && l < 3, "invalid state label %d", l);
+    int labels[3];
+    get_state_labels(self, src, labels);
+    return labels[l];
+}
+
 void common_load_model(model_t model,const char*name,int mapa){
     Warning(infoLong,"Loading %s",name);
     model_nr = GBgetModelNr(model);
@@ -287,7 +298,11 @@ void common_load_model(model_t model,const char*name,int mapa){
     main_models[model_count]=model;
     context->reach_actions=reach_actionss[model_count]=SIcreate();
     if (mapa){
-        context->spec=scoop_load_mapa((char*)name);
+        if(iomapa){
+            context->spec=scoop_load_mapa((char*)name, "true");
+        } else {
+            context->spec=scoop_load_mapa((char*)name, "false");
+        }
     } else {
         context->spec=scoop_load_prcrl((char*)name);
     }
@@ -332,8 +347,11 @@ void common_load_model(model_t model,const char*name,int mapa){
     lts_type_set_edge_label_type(ltstype,4,"nat");
     lts_type_set_edge_label_name(ltstype,5,"denominator");
     lts_type_set_edge_label_type(ltstype,5,"pos");
-    
-    dm_create(&context->class_matrix,3,nSmds);
+    if(!iomapa){
+        dm_create(&context->class_matrix,3,nSmds);
+    } else {
+        dm_create(&context->class_matrix,5,nSmds);
+    }
 
     lts_type_set_state_label_count(ltstype,3);
     lts_type_set_state_label_name(ltstype,0,"goal");
@@ -373,24 +391,59 @@ void common_load_model(model_t model,const char*name,int mapa){
                 }
             }
         }
-        if (strcmp(action,"tau")==0) {
-            if(check_confluence){ // mark entry as silent
-                dm_set(&conf_infos[model_count],1,i);
+        if (iomapa){
+            if (strcmp(action,"tau")==0) {
+                if(check_confluence){ // mark entry as silent
+                    dm_set(&conf_infos[model_count],1,i);
+                }
+                dm_set(&context->class_matrix,0,i);
+            } else if (strncmp(action,"rate",4)==0) {
+                dm_set(&context->class_matrix,4,i);
+                // rate steps do not make a tau step non-confluent
+            } else {
+                if (strcmp(action,"reachConditionAction")!=0 &&
+                    strcmp(action,"stateRewardAction")!=0) {
+                    if(!iomapa){
+                        dm_set(&context->class_matrix,1,i);
+                    } else {
+                        if (action[strlen(action) - 1] == '?'){
+                            dm_set(&context->class_matrix,3,i);//input action
+                        } else {
+                            if (action[strlen(action) - 1] == '!'){
+                                dm_set(&context->class_matrix,2,i);//output action
+                            } else {
+                                dm_set(&context->class_matrix,1,i);//internal action
+                            }
+                        }
+                    }
+                    if(check_confluence){ // other steps make tau steps non-confluent
+                        dm_set(&conf_infos[model_count],2,i);
+                    }
+                }
             }
-            dm_set(&context->class_matrix,0,i);
-        } else if (strncmp(action,"rate",4)==0) {
-            dm_set(&context->class_matrix,2,i);
-            // rate steps do not make a tau step non-confluent
         } else {
-            if (strcmp(action,"reachConditionAction")!=0 &&
-                strcmp(action,"stateRewardAction")!=0) {
-                dm_set(&context->class_matrix,1,i);
-                if(check_confluence){ // other steps make tau steps non-confluent
-                    dm_set(&conf_infos[model_count],2,i);
+            if (strcmp(action,"tau")==0) {
+                if(check_confluence){ // mark entry as silent
+                    dm_set(&conf_infos[model_count],1,i);
+                }
+                dm_set(&context->class_matrix,0,i);
+            } else if (strncmp(action,"rate",4)==0) {
+                dm_set(&context->class_matrix,2,i);
+                // rate steps do not make a tau step non-confluent
+            } else {
+                if (strcmp(action,"reachConditionAction")!=0 &&
+                    strcmp(action,"stateRewardAction")!=0) {
+                    dm_set(&context->class_matrix,1,i);
+                    if(check_confluence){ // other steps make tau steps non-confluent
+                        dm_set(&conf_infos[model_count],2,i);
+                    }
                 }
             }
         }
     }
+    FILE *class = fopen("class.txt", "w+");
+    dm_print(class, &context->class_matrix);
+    fclose(class);
 
 	GBsetLTStype(model,ltstype);
     GBchunkPutAt(model,bool_type,chunk_str("F"),0);
@@ -400,15 +453,31 @@ void common_load_model(model_t model,const char*name,int mapa){
 
 
     static matrix_t progress_matrixs[10];
-    if (max_progress != MAX_PROGRESS_NONE){
-        //static matrix_t progress_matrixs[10];
-        dm_create(&progress_matrixs[model_count],3,3);
-        dm_set(&progress_matrixs[model_count],0,2);
-        if (max_progress == MAX_PROGRESS_ALL) dm_set(&progress_matrixs[model_count],1,2);
+    if(!iomapa){
+        if (max_progress != MAX_PROGRESS_NONE){
+            //static matrix_t progress_matrixs[10];
+            dm_create(&progress_matrixs[model_count],3,3);
+            dm_set(&progress_matrixs[model_count],0,2);
+            if (max_progress == MAX_PROGRESS_ALL) dm_set(&progress_matrixs[model_count],1,2);
+            int id=GBsetMatrix(model,"inhibit",&progress_matrixs[model_count],PINS_STRICT,PINS_INDEX_OTHER,PINS_INDEX_OTHER);
+            Warning(info,"inhibit matrix registered as %d",id);
+        }
+    } else { //io markov chain
+        dm_create(&progress_matrixs[model_count],5,5);
+        dm_set(&progress_matrixs[model_count],0,4);
+        dm_set(&progress_matrixs[model_count],0,3);
+        dm_set(&progress_matrixs[model_count],1,4);
+        dm_set(&progress_matrixs[model_count],1,3);
+        dm_set(&progress_matrixs[model_count],2,4);
+        dm_set(&progress_matrixs[model_count],2,3);
         int id=GBsetMatrix(model,"inhibit",&progress_matrixs[model_count],PINS_STRICT,PINS_INDEX_OTHER,PINS_INDEX_OTHER);
         Warning(info,"inhibit matrix registered as %d",id);
     }
     
+    FILE *progress = fopen("progress.txt", "w+");
+    dm_print(progress, &progress_matrixs[model_count]);
+    fclose(progress);
+
 	//NOTE in older ghc: int == int64 and NOT int.
 	
 	int state[N];
@@ -430,9 +499,9 @@ void common_load_model(model_t model,const char*name,int mapa){
         }
     }
     GBsetDMInfo(model, &dm_infos[model_count]);
-    GBsetNextStateLong(model,PRCRLdelegateTransitionsLong);
+    GBsetNextStateLong(model,PRCRLgetTransitionsLong);
     
-    model_t raw_model=GBcreateBase();
+/*    model_t raw_model=GBcreateBase();
     GBcopyChunkMaps(raw_model,model);
     GBsetLTStype(raw_model,ltstype);
     GBsetContext(raw_model,context);
@@ -440,9 +509,11 @@ void common_load_model(model_t model,const char*name,int mapa){
     GBsetDMInfo(raw_model, &dm_infos[model_count]);
     GBsetNextStateLong(raw_model,PRCRLgetTransitionsLong);
     context->cached=GBaddCache(raw_model);
-
+*/
     GBsetStateLabelsAll(model,get_state_labels);
+    GBsetStateLabelLong(model, get_state_label);
     GBsetStateLabelInfo(model, &sl_infos[model_count]);
+
     
     if (enable_rewards){
         if (reach_smds>0){

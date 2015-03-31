@@ -245,7 +245,7 @@ this method determines the type of model by extension and loads it. If
 the parameter wrapped is not NULL then the default wrappers are applied to
 the model and the result is put in wrapped.
 */
-extern void GBloadFile(model_t model,const char *filename,model_t *wrapped);
+extern void GBloadFiles(model_t model,const char **filename,int files,model_t *wrapped);
 /**
 \brief Factory method for loading models concurrently.
 
@@ -255,7 +255,7 @@ the read-only variables of model.
 
 \see GBregisterPreLoader
 */
-extern void GBloadFileShared(model_t model,const char *filename);
+extern void GBloadFilesShared(model_t model,const char **filename, int files);
 
 /**
 \brief Get the basic LTS type or structure of the model.

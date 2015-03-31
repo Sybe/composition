@@ -26,6 +26,7 @@ size_t           init_threshold;
 int              act_index = -1;
 int              act_type = -1;
 int              act_label = -1;
+int              filecount;
 
 //TODO: rename/eliminate these variables
 size_t           W = -1;            // Number of workers (threads or processes)
@@ -40,7 +41,7 @@ size_t           EL;                // number of edge labels
 void
 global_alloc  (bool procs)
 {
-    GBloadFilesShared (NULL, files); // NOTE: no model argument
+    GBloadFilesShared (NULL, files, &filecount); // NOTE: no model argument
     RTswitchAlloc (procs);
     global = RTmallocZero (sizeof(global_t));
     RTswitchAlloc (false);

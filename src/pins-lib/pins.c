@@ -1315,7 +1315,6 @@ GBloadFilesShared (model_t model, const char **filenames, int files)
 }
 
 void GBregisterLoader(const char*extension,pins_loader_t loader){
-    printf("blaaaat\n");
 	if (registered<MAX_TYPES){
 		model_type[registered]=strdup(extension);
 		model_loader[registered]=loader;

@@ -109,7 +109,6 @@ static int HREcallPopt(int argc,char*argv[],struct poptOption optionsTable[],
             HREprintUsage();
             return 1;
         }
-        printf("arg: %s\n", args[i]);
     }
     if (max_args >= min_args) {
         for(int i=min_args;i<max_args && i < argc;i++){
@@ -119,7 +118,6 @@ static int HREcallPopt(int argc,char*argv[],struct poptOption optionsTable[],
             } else {
                 args[i]=NULL;
             }
-            printf("arg: %s\n", args[i]);
         }
         if (poptPeekArg(optCon)!=NULL) {
             Print(error,"too many arguments");
