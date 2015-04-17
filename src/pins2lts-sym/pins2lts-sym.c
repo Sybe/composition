@@ -4151,7 +4151,7 @@ actual_main(void)
         }
     }
     if (file_count > 1 && (0 != strcmp(strrchr(files[0], '.'), strrchr(files[file_count - 1], '.')))){
-        do_output(files[file_count - 1], visited);//outputting files does not work yet //TODO
+        do_output(files[file_count - 1], visited);
     }
 //    do_output(files[1], visited);
     if (spg) { // converting the LTS to a symbolic parity game, save and solve.

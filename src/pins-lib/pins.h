@@ -96,6 +96,10 @@ extern int GBsetMatrix(
     index_class_t row_info,
     index_class_t column_info);
 
+extern void GBsetModelNr(model_t model,int nr);
+
+extern int GBgetModelNr(model_t model);
+
 /**
 @defgroup static_analysis_getters Functions to extract static information.
 @ingroup greybox_user

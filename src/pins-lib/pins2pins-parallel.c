@@ -22,11 +22,13 @@ static int bool_type;       //Boolean type
 
 static int TAU = 0;
 static int INTERN = 1;
-static int RATE = 4;
-static int INPUT = 3;
 static int OUTPUT = 2;
+static int INPUT = 3;
+static int RATE = 4;
 
-static int MAX_LABEL_LENGTH = 100;
+#define MAX_LABEL_LENGTH 100
+
+//static int MAX_LABEL_LENGTH = 100;
 
 typedef matrix_t* (*matrixCall)(model_t model);
 
@@ -42,11 +44,13 @@ typedef struct{
     int group1;     //The original transition group from the first model
     int group2;     //The original transition group from the second model
     model_t model;  //The composed model
+    char* label;    //The label of the action
+    int result;     //If synchronization succeeds this is set to 1, else to 0
 } parrallel_ctx ;
 
 typedef struct{
-    int *to1;
-    int* to2;
+    int *map1;
+    int *map2;
     int length1;
     int length2;
     int maxLength1;
@@ -55,40 +59,65 @@ typedef struct{
 
 static mapping_t* map;
 
+void
+strip_io_label_complete(char* label){
+    for(int i = 0; i < MAX_LABEL_LENGTH && label[i] != '\0'; i++){
+        if(label[i] == '?' || label[i] == '!'){
+            while(label[i] != '\0'){
+                label[i] = '\0';
+                i++;
+            }
+        }
+    }
+}
+
+void
+strip_io_label(char* label){
+    for(int i = 0; i < MAX_LABEL_LENGTH && label[i] != '\0'; i++){
+        if(label[i] == '?' || label[i] == '!'){
+            i++;
+            while(label[i - 1] != '\0'){
+                label[i - 1] = label[i];
+                i++;
+            }
+        }
+    }
+}
+
 /**
  * Sets a mapping for the action chunks
  */
 static void
 map_chunk(int model, int from, int to){
-    if (model == 1){
-        if(from >= map->length2){
-            if (map->length2 == map->maxLength2){
-                int f2[2*(map->length2)];
-                int t2[2*(map->length2)];
-                for(int i = 0; i < map->length2; i++){
-                    t2[i] = map->to2[i];
-                }
-                map->maxLength2 = map->maxLength2 * 2;
-                map->to2 = t2;
-                map->length2 = map->length2 + 1;
-            }
-        }
-        map->to2[from] = to;
-    }
     if (model == 0){
         if(from >= map->length2){
             if (map->length1 == map->maxLength1){
                 int f1[2*(map->length1)];
                 int t1[2*(map->length1)];
                 for(int i = 0; i < map->length1; i++){
-                    t1[i] = map->to1[i];
+                    t1[i] = map->map1[i];
                 }
                 map->maxLength1 = map->maxLength1 * 2;
-                map->to1 = t1;
+                map->map1 = t1;
                 map->length1 = map->length1 + 1;
             }
         }
-        map->to1[from] = to;
+        map->map1[from] = to;
+    }
+    if (model == 1){
+        if(from >= map->length2){
+            if (map->length2 == map->maxLength2){
+                int f2[2*(map->length2)];
+                int t2[2*(map->length2)];
+                for(int i = 0; i < map->length2; i++){
+                    t2[i] = map->map2[i];
+                }
+                map->maxLength2 = map->maxLength2 * 2;
+                map->map2 = t2;
+                map->length2 = map->length2 + 1;
+            }
+        }
+        map->map2[from] = to;
     }
 }
 
@@ -98,17 +127,17 @@ map_chunk(int model, int from, int to){
 static int
 get_chunk(int model, int from){
     int result = 0;
-    if (model == 1){
-        result = map->to2[from];
-    }
     if (model == 0){
-        result = map->to1[from];
+        result = map->map1[from];
+    }
+    if (model == 1){
+        result = map->map2[from];
     }
     return result;
 }
 
 
-// very mapa specific
+// Mapa specific
 void
 set_chunks(model_t model){
     int chunks_counted[lts_type_get_type_count(GBgetLTStype(model))];
@@ -137,37 +166,6 @@ set_chunks(model_t model){
         bools[i] = bools_counted;
         bools_counted = 0;
     }
-//    Warning(info, "State vars counted: %d", state_vars_counted);
-    //Dit voor overige labels
-//    for(int j = lts_type_get_state_length(GBgetLTStype(models[0])) + 1 - bools[0]; j < lts_type_get_type_count(GBgetLTStype(models[0])); j++){
-//        for(int k = 0; k < GBchunkCount(models[0], j); k++){
-//            chunk c = GBchunkGet(models[0], j, k);
-//            Warning(info, "models[0]:  %s", c.data);
-//            GBchunkPutAt(model, j - lts_type_get_state_length(GBgetLTStype(models[0])) + state_vars_counted, c, k);
-//
-//        }
-//    }
-//    for(int j = lts_type_get_state_length(GBgetLTStype(models[1])) + 1 - bools[1]; j < lts_type_get_type_count(GBgetLTStype(models[1])); j++){
-//        for(int k = 0; k < GBchunkCount(models[1], j); k++){
-//            chunk c = GBchunkGet(models[1], j, k);
-//            Warning(info, "models[1]:  %s", c.data);
-//            int already_set = 0;
-//            for(int l = 0; l < GBchunkCount(model, j - lts_type_get_state_length(GBgetLTStype(models[1])) + state_vars_counted + 1); l++){
-//                if(strcmp(GBchunkGet(model, j - lts_type_get_state_length(GBgetLTStype(models[1])) + state_vars_counted + 1, l).data,c.data)==0){
-//                    Warning(info, "duplicate found: %s", c.data);
-//                    map_chunk(1, k, l);
-//                    already_set = 1;
-//                }
-//            }
-//            if(!already_set){
-//                GBchunkPutAt(model, j - lts_type_get_state_length(GBgetLTStype(models[1])) + state_vars_counted + 1, c, GBchunkCount(model, j - lts_type_get_state_length(GBgetLTStype(models[1])) + state_vars_counted + 1));
-//                Warning(info, "chunks set: %d", GBchunkCount(model, j - lts_type_get_state_length(GBgetLTStype(models[1])) + state_vars_counted + 1));
-//                if (j == lts_type_get_state_length(GBgetLTStype(models[1])) + 1 - bools[1]){
-//                    map_chunk(1, k, GBchunkCount(model, j - lts_type_get_state_length(GBgetLTStype(models[1])) + state_vars_counted + 1) - 1);
-//                }
-//            }
-//        }
-//    }
 }
 
 /*
@@ -261,8 +259,10 @@ void combineSLMatrices(model_t *models, matrix_t *dst){
     }
 }
 /*
- * Reads the input txt files and based on those creates an arry which decides what groups to evaluate
+ * Reads the input txt files in mlppe format and based on those
+ * creates an array which decides what groups to evaluate
  */
+// MAPA specific
 void
 create_correct_groups(model_t model, char *file1, char *file2){
     FILE *f1 = fopen(file1, "r");
@@ -278,34 +278,23 @@ create_correct_groups(model_t model, char *file1, char *file2){
                 char label[MAX_LABEL_LENGTH];
                 HREassert(fscanf(f1, "%s", label) == 1);
                 strcpy(labels1[group], label);
-                if (label != NULL){
+                if (label != NULL){//todo niet meer alleen op laatste char checken
                     switch(label[0]){
                     case '(' :
                         types1[group] = RATE;
                         break;
-                    case 't' :
+                    default :
                         if (strcmp(label, "tau") == 0) {
                             types1[group] = TAU;
                         } else {
-                            if(label[strlen(label) - 1] == '?'){
+                            if(strchr(label,  '?') != NULL){
                                 types1[group] = INPUT;
                             } else {
-                                if(label[strlen(label) - 1] == '!'){
+                                if(strchr(label,  '!') != NULL){
                                     types1[group] = OUTPUT;
                                 } else {
                                     types1[group] = INTERN;
                                 }
-                            }
-                        }
-                        break;
-                    default:
-                        if(label[strlen(label) - 1] == '?'){
-                            types1[group] = INPUT;
-                        } else {
-                            if(label[strlen(label) - 1] == '!'){
-                                types1[group] = OUTPUT;
-                            } else {
-                                types1[group] = INTERN;
                             }
                         }
                         break;
@@ -333,29 +322,18 @@ create_correct_groups(model_t model, char *file1, char *file2){
                    case '(' :
                         types2[group] = RATE;
                         break;
-                    case 't' :
+                    default :
                         if (strcmp(label, "tau") == 0) {
                             types2[group] = TAU;
                         } else {
-                            if(label[strlen(label) - 1] == '?'){
+                            if(strchr(label,  '?') != NULL){
                                 types2[group] = INPUT;
                             } else {
-                                if(label[strlen(label) - 1] == '!'){
+                                if(strchr(label,  '!') != NULL){
                                     types2[group] = OUTPUT;
                                 } else {
                                     types2[group] = INTERN;
                                 }
-                            }
-                        }
-                        break;
-                    default:
-                        if(label[strlen(label) - 1] == '?'){
-                            types2[group] = INPUT;
-                        } else {
-                            if(label[strlen(label) - 1] == '!'){
-                                types2[group] = OUTPUT;
-                            } else {
-                                types2[group] = INTERN;
                             }
                         }
                         break;
@@ -366,62 +344,66 @@ create_correct_groups(model_t model, char *file1, char *file2){
         }
     }
     fclose(f2);
+    Warning(info, "files closed");
     correct_groups = RTmalloc(dm_nrows(GBgetDMInfo(model))*sizeof(int));
     for(int i = 0; i < dm_nrows(GBgetDMInfo(model)); i++){
-        if(i < dm_nrows(GBgetDMInfo(models[0]))){
+        if(i < dm_nrows(GBgetDMInfo(models[0]))){//Row in model 1
             if((types1[i] == TAU || types1[i] == RATE || types1[i] == INTERN)){
-                correct_groups[i] = 1;
+                correct_groups[i] = 1;//Never need to synchronize, so always execute
             } else { //input or output
                 correct_groups[i] = 1;
                 char label1[MAX_LABEL_LENGTH];
                 strcpy(label1, labels1[i]);
-                label1[strlen(label1) - 1] = 0;
+                strip_io_label_complete(label1);
                 for(int j = 0; j < dm_nrows(GBgetDMInfo(models[1])); j++){
                     char label2[MAX_LABEL_LENGTH];
                     strcpy(label2, labels2[j]);
-                    label2[strlen(label2) - 1] = 0;
-                    if(strcmp(label2, label1) == 0){
+                    strip_io_label_complete(label2);//Strip the '?' or '!'
+                    if(strcmp(label2, label1) == 0 && ((types1[i] == INPUT && types2[j] == OUTPUT) ||(types1[i] == OUTPUT && types2[j] == INPUT))){//If an action is present in both models, and it is input in a model and output in the other model, it has to synchronize
                         correct_groups[i] = 0;
                     }
                 }
             }
         } else {
-            if(i < dm_nrows(GBgetDMInfo(models[0]))+ dm_nrows(GBgetDMInfo(models[1]))){
-                if((types2[i - dm_nrows(GBgetDMInfo(models[0]))] == TAU || types2[i - dm_nrows(GBgetDMInfo(models[0]))] == RATE || types2[i - dm_nrows(GBgetDMInfo(models[0]))] == INTERN)){
-                    correct_groups[i] = 1;
+            if(i < dm_nrows(GBgetDMInfo(models[0]))+ dm_nrows(GBgetDMInfo(models[1]))){//Row in model 2
+                if((types2[i - dm_nrows(GBgetDMInfo(models[0]))] == TAU
+                 || types2[i - dm_nrows(GBgetDMInfo(models[0]))] == RATE
+                 || types2[i - dm_nrows(GBgetDMInfo(models[0]))] == INTERN)){
+                    correct_groups[i] = 1;//Never need to synchronize, so always execute
                 } else { //input or output
                     correct_groups[i] = 1;
                     char label2[MAX_LABEL_LENGTH];
                     strcpy(label2, labels2[i  - dm_nrows(GBgetDMInfo(models[0]))]);
-                    label2[strlen(label2) - 1] = 0;
+                    strip_io_label_complete(label2);//Strip the '?' or '!'
                     for(int j = 0; j < dm_nrows(GBgetDMInfo(models[0])); j++){
                         char label1[MAX_LABEL_LENGTH];
                         strcpy(label1, labels1[j]);
-                        label1[strlen(label1) - 1] = 0;
-                        if(strcmp(label1, label2) == 0){
+                        strip_io_label_complete(label1);//Strip the '?' or '!'
+                        if(strcmp(label1, label2) == 0&& ((types2[i - dm_nrows(GBgetDMInfo(models[0]))] == INPUT && types1[j] == OUTPUT) ||(types2[i - dm_nrows(GBgetDMInfo(models[0]))] == OUTPUT && types1[j] == INPUT))){//If an action is present in both models, and it is input in a model and output in the other model, it has to synchronize
                             correct_groups[i] = 0;
                         }
                     }
                 }
-            } else {
-                int group_nr = i - dm_nrows(GBgetDMInfo(models[0])) - dm_nrows(GBgetDMInfo(models[1]));
-                int group1 = group_nr / dm_nrows(GBgetDMInfo(models[1]));
-                int group2 = group_nr % dm_nrows(GBgetDMInfo(models[1]));
+            } else {//Row combined of 2 models, synchronization
+                int group_nr = i - dm_nrows(GBgetDMInfo(models[0])) - dm_nrows(GBgetDMInfo(models[1]));//Restart counting at first combined row
+                int group1 = group_nr / dm_nrows(GBgetDMInfo(models[1]));//Group of first model
+                int group2 = group_nr % dm_nrows(GBgetDMInfo(models[1]));//Group of second model
                 char label1[MAX_LABEL_LENGTH];
                 char label2[MAX_LABEL_LENGTH];
                 strcpy(label1, labels1[group1]);
                 strcpy(label2, labels2[group2]);
-                label1[strlen(label1) - 1] = 0;
-                label2[strlen(label2) - 1] = 0;
+                strip_io_label_complete(label1);//Strip the '?' or '!'
+                strip_io_label_complete(label2);//Strip the '?' or '!'
                 if(types1[group1] != RATE && types1[group1] != TAU && types1[group1] != INTERN && strcmp(label1, label2) == 0){
                     if(types1[group1] == INPUT && types2[group2] == INPUT){
                         correct_groups[i] = 1;
                     } else {
-                        if((types1[group1] == INPUT && types2[group2] == OUTPUT) || (types1[group1] == OUTPUT && types2[group2] == INPUT)){
+                        if((types1[group1] == INPUT  && types2[group2] == OUTPUT)
+                        || (types1[group1] == OUTPUT && types2[group2] == INPUT)){//Synchronization based on input vs. output possible
                             correct_groups[i] = 1;
                         } else {
-                            if(types1[group1] == OUTPUT && types2[group2] == OUTPUT){
-                                Abort("Shared output action %s, behavior not defined.", label1);
+                            if(types1[group1] == OUTPUT && types2[group2] == OUTPUT && (labels1[group1][strlen(labels1[group1]) - 1] == '?' || labels1[group1][strlen(labels1[group1]) - 1] == '!')){
+                                Abort("Shared output action %s!, behavior not defined.", label1);
                             } else {
                                 correct_groups[i] = 0;
                             }
@@ -433,6 +415,10 @@ create_correct_groups(model_t model, char *file1, char *file2){
             }
         }
     }
+    for(int i = 0; i < dm_nrows(GBgetDMInfo(model)); i++){
+        printf("%d", correct_groups[i]);
+    }
+    printf("\n");
 }
 
 
@@ -476,18 +462,49 @@ static void parralel_cb (void*context,transition_info_t*transition_info,int*dst,
             old_actions = i;
         }
     }
-    chunk c = GBchunkGet(models[ctx->model_nr], old_actions, ti.labels[2]);\
-    int pos = GBchunkPut(ctx->model, actions, c);
-    map_chunk(ctx->model_nr, ti.labels[2], pos);
-    //Mapa specific
-    ti.labels[2] = get_chunk(ctx->model_nr, ti.labels[2]);
-    ctx->cb(ctx->ctx, &ti, dest, cpy);
+    chunk c = GBchunkGet(models[ctx->model_nr], old_actions, ti.labels[2]);
+    if(ctx->sync){
+        char* label = malloc(MAX_LABEL_LENGTH * sizeof(char));
+        strcpy(label, c.data);
+        strip_io_label(label);
+        if(strcmp(label, ctx->label) == 0){
+            int pos = GBchunkPut(ctx->model, actions, c);
+            map_chunk(ctx->model_nr, ti.labels[2], pos);
+            //Mapa specific
+            ti.labels[2] = get_chunk(ctx->model_nr, ti.labels[2]);
+            ctx->cb(ctx->ctx, &ti, dest, cpy);
+            ctx->result = 1;
+        } else {
+            ctx->result = 0;
+        }
+    } else {
+        int pos = GBchunkPut(ctx->model, actions, c);
+        map_chunk(ctx->model_nr, ti.labels[2], pos);
+        //Mapa specific
+        ti.labels[2] = get_chunk(ctx->model_nr, ti.labels[2]);
+        ctx->cb(ctx->ctx, &ti, dest, cpy);
+        ctx->result = 1;
+    }
 }
 /*
  * Used as callback function if the group in the first model is the input action
  */
 static void parallel_sync_cb1(void*context,transition_info_t*transition_info,int*dst,int*cpy){
     parrallel_ctx*ctx = (parrallel_ctx*)context;
+    int actions = 0;
+    for (int i = 0; i < lts_type_get_type_count(GBgetLTStype(models[ctx->model_nr])); i++){
+        if(strcmp(lts_type_get_type(GBgetLTStype(models[ctx->model_nr]), i),"action") == 0){
+            actions = i;
+        }
+    }
+    chunk c = GBchunkGet(models[ctx->model_nr], actions, transition_info->labels[2]);
+    char* label=malloc(MAX_LABEL_LENGTH * sizeof(char));
+    strcpy(label, c.data);
+    strip_io_label(label);
+    static char ctxLabel[MAX_LABEL_LENGTH];
+    ctx->label = ctxLabel;
+    strcpy(ctx->label, label);
+    free(label);
     int columns = lts_type_get_state_length(GBgetLTStype(models[0]));
     for(int j = 0; j < columns; j++){
         ctx->state[j] = dst[j];
@@ -499,6 +516,20 @@ static void parallel_sync_cb1(void*context,transition_info_t*transition_info,int
  */
 static void parallel_sync_cb2(void*context,transition_info_t*transition_info,int*dst,int*cpy){
     parrallel_ctx*ctx = (parrallel_ctx*)context;
+    int actions = 0;
+    for (int i = 0; i < lts_type_get_type_count(GBgetLTStype(models[ctx->model_nr])); i++){
+        if(strcmp(lts_type_get_type(GBgetLTStype(models[ctx->model_nr]), i),"action") == 0){
+            actions = i;
+        }
+    }
+    chunk c = GBchunkGet(models[ctx->model_nr], actions, transition_info->labels[2]);
+    char* label=malloc(MAX_LABEL_LENGTH * sizeof(char));
+    strcpy(label, c.data);
+    strip_io_label(label);
+    static char ctxLabel[MAX_LABEL_LENGTH];
+    ctx->label = ctxLabel;
+    strcpy(ctx->label, label);
+    free(label);
     int columns = lts_type_get_state_length(GBgetLTStype(models[1]));
     int columns_model_1 = lts_type_get_state_length(GBgetLTStype(models[0]));
     for(int j = 0; j < columns; j++){
@@ -509,6 +540,7 @@ static void parallel_sync_cb2(void*context,transition_info_t*transition_info,int
 /*
  * Next state function
  */
+// Mapa specific
 int
 getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
 {
@@ -559,6 +591,7 @@ getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
                 for(int i = 0; i < state_vars[1]; i++){
                     source2[i] = src[i + state_vars[0]];
                 }
+                context->model_nr = 1;
                 result = GBgetTransitionsLong(models[1], group2, source2, parallel_sync_cb2, context);
                 if (result != 0){
                     context->model_nr = 0;
@@ -573,6 +606,7 @@ getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
                 for(int i = 0; i < state_vars[0]; i++){
                     source1[i] = src[i];
                 }
+                context->model_nr = 0;
                 result = GBgetTransitionsLong(models[0], group1, source1, parallel_sync_cb1, context);
                 if (result != 0){
                     context->model_nr = 1;
@@ -678,11 +712,16 @@ matrices_present(matrixCall mc, model_t *models){
     return result;
 }
 
+//Mapa specific
 void
 GBparallelCompose (model_t composition, char **files, int file_count, pins_loader_t loader)
 {
     Warning(info, "Initializing awesome parallel composition layer");
     model_count = 2;//file_count
+
+    if(file_count < 4){
+        Abort("Trying to compose with only %d input files, at least 4 needed", file_count);
+    }
     models = malloc(model_count*sizeof(model_t));
     for(int i = 0; i < 2; i++){
         models[i] = GBcreateBase();
@@ -694,16 +733,14 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
         GBsetModelNr(models[i], i);
         Warning(info, "Starting loader");
         loader(models[i], files[i]);
-        Warning(info, "Loader finished");
     }
-    Warning(info, "Models to compose:%d",file_count);
     map = malloc(sizeof(mapping_t));
     static int to2[10];
-    map->to2 = to2;
+    map->map2 = to2;
     map->maxLength2 = 10;
     map->length2 = 0;
     static int to1[10];
-    map->to1 = to1;
+    map->map1 = to1;
     map->maxLength1 = 10;
     map->length1 = 0;
 
@@ -818,16 +855,12 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
             }
         }
 
-        FILE *original = fopen("original.txt", "w+");
-        FILE *combination = fopen("composition.txt", "w+");
-//        dm_print(original, GBgetStateLabelInfo(models[0]));
-        dm_print(combination, &p_dm_class);
-        fclose(original);
-        fclose(combination);
-
-
         GBsetMatrix(composition,LTSMIN_EDGE_TYPE_ACTION_CLASS,&p_dm_class,PINS_STRICT,PINS_INDEX_OTHER,PINS_INDEX_GROUP);
+        FILE* class = fopen("class.txt", "w+");
+        dm_print(class, &p_dm_class);
+        fclose(class);
     }
+
     //Inhibit matrix
     int inhibit_id = GBgetMatrixID(models[0], "inhibit");
     if(inhibit_id >= 0){
@@ -842,12 +875,9 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
                 }
             }
         }
-        FILE *inhibit = fopen("inhibit.txt", "w+");
-        dm_print(inhibit, &p_dm_inhibit);
-        fclose(inhibit);
         GBsetMatrix(composition,"inhibit",&p_dm_inhibit,PINS_STRICT,PINS_INDEX_OTHER,PINS_INDEX_OTHER);
-
     }
+
     //LTS Type
     lts_type_t ltstype = lts_type_create();
     bool_type=lts_type_put_type(ltstype,"Bool",LTStypeChunk,NULL);

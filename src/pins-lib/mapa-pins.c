@@ -441,9 +441,6 @@ void common_load_model(model_t model,const char*name,int mapa){
             }
         }
     }
-    FILE *class = fopen("class.txt", "w+");
-    dm_print(class, &context->class_matrix);
-    fclose(class);
 
 	GBsetLTStype(model,ltstype);
     GBchunkPutAt(model,bool_type,chunk_str("F"),0);
@@ -455,7 +452,6 @@ void common_load_model(model_t model,const char*name,int mapa){
     static matrix_t progress_matrixs[10];
     if(!iomapa){
         if (max_progress != MAX_PROGRESS_NONE){
-            //static matrix_t progress_matrixs[10];
             dm_create(&progress_matrixs[model_count],3,3);
             dm_set(&progress_matrixs[model_count],0,2);
             if (max_progress == MAX_PROGRESS_ALL) dm_set(&progress_matrixs[model_count],1,2);
@@ -463,15 +459,17 @@ void common_load_model(model_t model,const char*name,int mapa){
             Warning(info,"inhibit matrix registered as %d",id);
         }
     } else { //io markov chain
-        dm_create(&progress_matrixs[model_count],5,5);
-        dm_set(&progress_matrixs[model_count],0,4);
-        dm_set(&progress_matrixs[model_count],0,3);
-        dm_set(&progress_matrixs[model_count],1,4);
-        dm_set(&progress_matrixs[model_count],1,3);
-        dm_set(&progress_matrixs[model_count],2,4);
-        dm_set(&progress_matrixs[model_count],2,3);
-        int id=GBsetMatrix(model,"inhibit",&progress_matrixs[model_count],PINS_STRICT,PINS_INDEX_OTHER,PINS_INDEX_OTHER);
-        Warning(info,"inhibit matrix registered as %d",id);
+        if (max_progress != MAX_PROGRESS_NONE){
+            dm_create(&progress_matrixs[model_count],5,5);
+            dm_set(&progress_matrixs[model_count],0,4);
+            dm_set(&progress_matrixs[model_count],0,3);
+            dm_set(&progress_matrixs[model_count],1,4);
+            dm_set(&progress_matrixs[model_count],1,3);
+            dm_set(&progress_matrixs[model_count],2,4);
+            dm_set(&progress_matrixs[model_count],2,3);
+            int id=GBsetMatrix(model,"inhibit",&progress_matrixs[model_count],PINS_STRICT,PINS_INDEX_OTHER,PINS_INDEX_OTHER);
+            Warning(info,"inhibit matrix registered as %d",id);
+        }
     }
     
     FILE *progress = fopen("progress.txt", "w+");
@@ -501,6 +499,7 @@ void common_load_model(model_t model,const char*name,int mapa){
     GBsetDMInfo(model, &dm_infos[model_count]);
     GBsetNextStateLong(model,PRCRLgetTransitionsLong);
     
+    //This commented out because of parallel composition
 /*    model_t raw_model=GBcreateBase();
     GBcopyChunkMaps(raw_model,model);
     GBsetLTStype(raw_model,ltstype);
