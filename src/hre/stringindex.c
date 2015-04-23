@@ -216,9 +216,6 @@ static void PutEntry(string_index_t si,const char*str,int s_len,int index){
 	int bucket;
 
     ensure_access(si->man,index);
-    if(!(si->next[index] < 0)){
-        abort();
-    }
 	HREassert (si->next[index] < 0, "Cannot put %s at %d: position occupied by %s",
 	                                str,index,si->data[index]);
 	cut_from_free_list(si,index);

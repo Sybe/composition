@@ -49,12 +49,9 @@ typedef struct{
 } parrallel_ctx ;
 
 typedef struct{
-    int *map1;
-    int *map2;
-    int length1;
-    int length2;
-    int maxLength1;
-    int maxLength2;
+    int **map;
+    int *length;
+    int *maxLength;
 } mapping_t;         //Mapping for the action chunks
 
 static mapping_t* map;
@@ -122,36 +119,19 @@ strip_label(char* label){
  */
 static void
 map_chunk(int model, int from, int to){
-    if (model == 0){
-        if(from >= map->length2){
-            if (map->length1 == map->maxLength1){
-                int f1[2*(map->length1)];
-                int t1[2*(map->length1)];
-                for(int i = 0; i < map->length1; i++){
-                    t1[i] = map->map1[i];
-                }
-                map->maxLength1 = map->maxLength1 * 2;
-                map->map1 = t1;
-                map->length1 = map->length1 + 1;
+    if(from >= map->length[model]){
+        if(map->length[model] == map->maxLength[model]){
+            int t[2*map->length[model]];
+            for(int i = 0; i < map->length[model]; i++){
+                t[i] = map->map[model][i];
             }
+            map->maxLength[model] = map->maxLength[model] * 2;
+            free(map->map[model]);
+            map->map[model] = t;
+            map->length[model] = map->length[model] + 1;
         }
-        map->map1[from] = to;
     }
-    if (model == 1){
-        if(from >= map->length2){
-            if (map->length2 == map->maxLength2){
-                int f2[2*(map->length2)];
-                int t2[2*(map->length2)];
-                for(int i = 0; i < map->length2; i++){
-                    t2[i] = map->map2[i];
-                }
-                map->maxLength2 = map->maxLength2 * 2;
-                map->map2 = t2;
-                map->length2 = map->length2 + 1;
-            }
-        }
-        map->map2[from] = to;
-    }
+    map->map[model][from] = to;
 }
 
 /**
@@ -159,14 +139,7 @@ map_chunk(int model, int from, int to){
  */
 static int
 get_chunk(int model, int from){
-    int result = 0;
-    if (model == 0){
-        result = map->map1[from];
-    }
-    if (model == 1){
-        result = map->map2[from];
-    }
-    return result;
+    return map->map[model][from];
 }
 
 
@@ -186,18 +159,15 @@ set_chunks(model_t model){
     for(int i = 0; i < model_count; i++){
         int j;
         for(j = 0; j < lts_type_get_state_length(GBgetLTStype(models[i])) && strcmp(lts_type_get_state_type(GBgetLTStype(models[i]), j), "Bool") != 0; j++){
-            Warning(info, "%s", lts_type_get_state_type(GBgetLTStype(models[i]), j));
             if(strcmp(lts_type_get_state_type(GBgetLTStype(models[i]), j), "Bool") != 0){
                 for(int k = 0; k < GBchunkCount(models[i], j + 1 - bools_counted); k++){
                     chunk c = GBchunkGet(models[i], j + 1 - bools_counted, k);
-                    Warning(info, "Putting %s at %d position %d of type %s from model %d", c.data, j + state_vars_counted + 1 - bools_counted, k, lts_type_get_state_type(GBgetLTStype(models[i]), j), i);
                     GBchunkPutAt(model, j + state_vars_counted + 1 - bools_counted, c, k);
                 }
             } else {
                 bools_counted++;
             }
         }
-        Warning(info, "state length: %d", lts_type_get_state_length(GBgetLTStype(models[i])));
         state_vars_counted += j - bools_counted;
         total_bools += bools_counted;
         bools[i] = bools_counted;
@@ -628,9 +598,6 @@ static void parralel_cb (void*context,transition_info_t*transition_info,int*dst,
     for (int i = 0; i < lts_type_get_type_count(GBgetLTStype(ctx->model)); i++){
         if(strcmp(lts_type_get_type(GBgetLTStype(ctx->model), i),"action") == 0){
             actions = i;
-            Warning(info, "types %d", lts_type_get_type_count(GBgetLTStype(ctx->model)));
-            Warning(info, "actions = %d", i);
-            Warning(info, "%s", lts_type_get_type(GBgetLTStype(ctx->model),i));
         }
     }
     int old_actions = 0;
@@ -948,15 +915,14 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
         loader(models[i], files[i]);
     }
     map = malloc(sizeof(mapping_t));
-    static int to2[10];
-    map->map2 = to2;
-    map->maxLength2 = 10;
-    map->length2 = 0;
-    static int to1[10];
-    map->map1 = to1;
-    map->maxLength1 = 10;
-    map->length1 = 0;
-
+    map->map = malloc(model_count * sizeof(int*));
+    map->maxLength = malloc(model_count * sizeof(int));
+    map->length = malloc(model_count * sizeof(int));
+    for(int i = 0; i < model_count; i++){
+        map->map[i] = malloc(10*sizeof(int));
+        map->maxLength[i] = 10;
+        map->length[i] = 0;
+    }
 
     matrix_t *p_dm              = RTmalloc(sizeof(matrix_t));
     matrix_t *p_dm_read         = RTmalloc(sizeof(matrix_t));
@@ -1127,20 +1093,15 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
                 strcpy(tmp, lts_type_get_state_type(GBgetLTStype(models[i]), j));
                 strcat(strcat(tmp, "_"),model_nr_str);
                 lts_type_set_state_type(ltstype, j + state_length_counted, tmp);
-                Warning(info, "non-bool added");
             } else {
                 lts_type_set_state_name(ltstype, j + state_length_counted, lts_type_get_state_name(GBgetLTStype(models[i]), j));
                 lts_type_set_state_type(ltstype, j + state_length_counted, lts_type_get_state_type(GBgetLTStype(models[i]), j));
-                Warning(info, "bool added");
             }
-            Warning(info, "length %d", lts_type_get_state_length(ltstype));
         }
-        Warning(info, "types %d", lts_type_get_type_count(ltstype))
         state_length_counted += lts_type_get_state_length (GBgetLTStype(models[i]));
         edge_labels_counted += lts_type_get_edge_label_count(GBgetLTStype(models[i]));
         state_labels_counted += lts_type_get_state_label_count(GBgetLTStype(models[i]));
     }
-    Warning(info, "types %d", lts_type_get_type_count(ltstype));
     lts_type_put_type(ltstype,"action",LTStypeChunk,NULL);
     lts_type_put_type(ltstype,"nat",LTStypeDirect,NULL);
     lts_type_put_type(ltstype,"pos",LTStypeDirect,NULL);
@@ -1166,8 +1127,6 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
     lts_type_set_state_label_type(ltstype,1,"nat");
     lts_type_set_state_label_name(ltstype,2,"state_reward_denominator");
     lts_type_set_state_label_type(ltstype,2,"pos");
-
-    Warning(info, "types %d", lts_type_get_type_count(ltstype));
 
     GBsetLTStype(composition, ltstype);
     GBchunkPutAt(composition,bool_type,chunk_str("F"),0);
