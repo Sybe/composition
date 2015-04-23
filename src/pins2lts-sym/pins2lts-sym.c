@@ -2889,12 +2889,17 @@ do_output(char *etf_output, vset_t visited)
     }
 
     output_init(tbl_file);
+    Warning(info, "File_count: %d", file_count);
     if(file_count > 2){
         set_chunks(model);
     }
+    Warning(info, "trans");
     output_trans(tbl_file);
+    Warning(info, "lbls");
     output_lbls(tbl_file, visited);
+    Warning(info, "types");
     output_types(tbl_file);
+    Warning(info, "fclose");
     fclose(tbl_file);
     RTstopTimer(timer);
     RTprintTimer(info, timer, "writing output took");

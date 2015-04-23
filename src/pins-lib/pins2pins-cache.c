@@ -88,6 +88,7 @@ static int
 cached_short (model_t self, int group, int *src, TransitionCB cb,
               void *user_context, int (*short_proc)(model_t,int,int*,TransitionCB,void*))
 {
+    Warning(info, "cache group: %d", group);
     struct cache_context *ctx =
         (struct cache_context *)GBgetContext (self);
     struct group_cache *cache = &(ctx->cache[group]);
@@ -110,6 +111,7 @@ cached_short (model_t self, int group, int *src, TransitionCB cb,
         memcpy (dst, SIgetC (cache->idx, cache->dest[i], NULL),
                 cache->len);
         int *labels = cache->Nedge_labels == 0 ? NULL : &(cache->dest[i+EL_OFFSET]);
+        Warning(info, "label: %d", labels[2]);
         transition_info_t cbti = GB_TI(labels, group);
         cb (user_context, &cbti, dst, NULL);
     }

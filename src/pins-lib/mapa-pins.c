@@ -12,7 +12,7 @@
 static int check_confluence=0;
 static int enable_rewards=0;
 static int internal_max_progress=1;
-static int iomapa=1;
+static int iomapa=0;
 
 static const char const_long[]="const";
 static const char progress_long[]="max-progress";
@@ -275,7 +275,7 @@ static void get_state_labels(model_t self,int*src,int *label){
     label[0]=0;
     for (int i=0;i<N;i++){
       if (dm_is_set(dm_reach,0,i)){
-        if (GBgetTransitionsLong(ctx->cached,i,src,discard_callback,NULL)){
+        if (GBgetTransitionsLong(self,i,src,discard_callback,NULL)){
             label[0]=1;
             break;
         }
