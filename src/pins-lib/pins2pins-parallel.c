@@ -28,8 +28,6 @@ static int RATE;
 
 #define MAX_LABEL_LENGTH 100
 
-//static int MAX_LABEL_LENGTH = 100;
-
 typedef matrix_t* (*matrixCall)(model_t model);
 
 static model_t* model_comp;
@@ -84,18 +82,6 @@ strip_io_label(char* label){
             i++;
             while(label[i - 1] != '\0'){
                 label[i - 1] = label[i];
-                i++;
-            }
-        }
-    }
-}
-
-void
-strip_label_complete(char* label){
-    for(int i = 1; i < MAX_LABEL_LENGTH && label[i] != '\0'; i++){
-        if(label[i] == '('){
-            while(label[i] != '\0'){
-                label[i] = '\0';
                 i++;
             }
         }
@@ -271,126 +257,96 @@ void combineSLMatrices(model_t *models, matrix_t *dst){
  */
 // MAPA specific
 void
-create_correct_io_groups(model_t model, char *file1, char *file2){
-    FILE *f1 = fopen(file1, "r");
-    char c;
-    int group = 0;
-    char labels1[dm_nrows(GBgetDMInfo(models[0]))][MAX_LABEL_LENGTH];
-    int types1[dm_nrows(GBgetDMInfo(models[0]))];
-    while ((c = getc(f1)) != EOF){
-        if(c == '='){
-            char c1 = getc(f1);
-            if(c1 == '>'){
-                getc(f1);//Space
-                char label[MAX_LABEL_LENGTH];
-                HREassert(fscanf(f1, "%s", label) == 1);
-                strcpy(labels1[group], label);
-                if (label != NULL){
-                    switch(label[0]){
-                    case '(' :
-                        types1[group] = RATE;
-                        break;
-                    default :
-                        if (strcmp(label, "tau") == 0) {
-                            types1[group] = TAU;
-                        } else {
-                            if(strchr(label,  '?') != NULL){
-                                types1[group] = INPUT;
+create_correct_io_groups(model_t model, char **files, int file_count){
+
+    int max_groups = 0;
+    for (int i = 0; i < file_count; i++){
+        if(dm_nrows(GBgetDMInfo(models[i])) > max_groups){
+            max_groups = dm_nrows(GBgetDMInfo(models[i]));
+        }
+    }
+    char labels[file_count][max_groups][MAX_LABEL_LENGTH];
+    int types[file_count][max_groups];
+
+    for(int i = 0; i < file_count; i++){
+        FILE *f = fopen(files[i], "r");
+        char c;
+        int group = 0;
+        while ((c = getc(f)) != EOF){
+            if(c == '='){
+                char c1 = getc(f);
+                if(c1 == '>'){
+                    getc(f);//Space
+                    char label[MAX_LABEL_LENGTH];
+                    HREassert(fscanf(f, "%s", label) == 1);
+                    strcpy(labels[i][group], label);
+                    if (label != NULL){
+                        switch(label[0]){
+                        case '(' :
+                            types[i][group] = RATE;
+                            break;
+                        default :
+                            if (strcmp(label, "tau") == 0) {
+                                types[i][group] = TAU;
                             } else {
-                                if(strchr(label,  '!') != NULL){
-                                    types1[group] = OUTPUT;
+                                if(strchr(label,  '?') != NULL){
+                                    types[i][group] = INPUT;
                                 } else {
-                                    types1[group] = INTERN;
+                                    if(strchr(label,  '!') != NULL){
+                                        types[i][group] = OUTPUT;
+                                    } else {
+                                        types[i][group] = INTERN;
+                                    }
                                 }
                             }
+                            break;
                         }
-                        break;
                     }
+                    group++;
                 }
-                group++;
             }
         }
     }
-    fclose(f1);
-    FILE *f2 = fopen(file2, "r");
-    group = 0;
-    char labels2[dm_nrows(GBgetDMInfo(models[1]))][100];
-    int types2[dm_nrows(GBgetDMInfo(models[1]))];
-    while ((c = getc(f2)) != EOF){
-        if(c == '='){
-            char c1 = getc(f2);
-            if(c1 == '>'){
-                getc(f2);//Space
-                char label[MAX_LABEL_LENGTH];
-                HREassert(fscanf(f2, "%s", label) == 1);
-                strcpy(labels2[group], label);
-                if (label != NULL){
-                   switch(label[0]){
-                   case '(' :
-                        types2[group] = RATE;
-                        break;
-                    default :
-                        if (strcmp(label, "tau") == 0) {
-                            types2[group] = TAU;
-                        } else {
-                            if(strchr(label,  '?') != NULL){
-                                types2[group] = INPUT;
-                            } else {
-                                if(strchr(label,  '!') != NULL){
-                                    types2[group] = OUTPUT;
-                                } else {
-                                    types2[group] = INTERN;
-                                }
-                            }
-                        }
-                        break;
-                    }
-                }
-                group++;
-            }
-        }
-    }
-    fclose(f2);
     Warning(info, "files closed");
     correct_groups = RTmalloc(dm_nrows(GBgetDMInfo(model))*sizeof(int));
     for(int i = 0; i < dm_nrows(GBgetDMInfo(model)); i++){
         if(i < dm_nrows(GBgetDMInfo(models[0]))){//Row in model 1
-            if((types1[i] == TAU || types1[i] == RATE || types1[i] == INTERN)){
+            if((types[0][i] == TAU || types[0][i] == RATE || types[0][i] == INTERN)){
                 correct_groups[i] = 1;//Never need to synchronize, so always execute
             } else { //input or output
                 correct_groups[i] = 1;
                 char label1[MAX_LABEL_LENGTH];
-                strcpy(label1, labels1[i]);
+                strcpy(label1, labels[0][i]);
                 strip_io_label_complete(label1);
                 for(int j = 0; j < dm_nrows(GBgetDMInfo(models[1])); j++){
                     char label2[MAX_LABEL_LENGTH];
-                    strcpy(label2, labels2[j]);
+                    strcpy(label2, labels[1][j]);
                     strip_io_label_complete(label2);//Strip the '?' or '!'
                     if(strcmp(label2, label1) == 0 //If it is the same action
-                        && ((types1[i] == INPUT  && types2[j] == OUTPUT) //And one action is input and the other output
-                          ||(types1[i] == OUTPUT && types2[j] == INPUT))){
+                        && ((types[0][i] == INPUT  && types[1][j] == OUTPUT) //And one action is input and the other output
+                          ||(types[0][i] == OUTPUT && types[1][j] == INPUT))){
                         correct_groups[i] = 0; //Then it should synchronize, so not act alone
                     }
                 }
             }
         } else {
             if(i < dm_nrows(GBgetDMInfo(models[0]))+ dm_nrows(GBgetDMInfo(models[1]))){//Row in model 2
-                if((types2[i - dm_nrows(GBgetDMInfo(models[0]))] == TAU
-                 || types2[i - dm_nrows(GBgetDMInfo(models[0]))] == RATE
-                 || types2[i - dm_nrows(GBgetDMInfo(models[0]))] == INTERN)){
+                if((types[1][i - dm_nrows(GBgetDMInfo(models[0]))] == TAU
+                 || types[1][i - dm_nrows(GBgetDMInfo(models[0]))] == RATE
+                 || types[1][i - dm_nrows(GBgetDMInfo(models[0]))] == INTERN)){
                     correct_groups[i] = 1;//Never need to synchronize, so always execute
                 } else { //input or output
                     correct_groups[i] = 1;
                     char label2[MAX_LABEL_LENGTH];
-                    strcpy(label2, labels2[i  - dm_nrows(GBgetDMInfo(models[0]))]);
+                    strcpy(label2, labels[1][i  - dm_nrows(GBgetDMInfo(models[0]))]);
                     strip_io_label_complete(label2);//Strip the '?' or '!'
                     for(int j = 0; j < dm_nrows(GBgetDMInfo(models[0])); j++){
                         char label1[MAX_LABEL_LENGTH];
-                        strcpy(label1, labels1[j]);
+                        strcpy(label1, labels[0][j]);
                         strip_io_label_complete(label1);//Strip the '?' or '!'
                         if(strcmp(label1, label2) == 0 //If it is the same action
-                            && ((types2[i - dm_nrows(GBgetDMInfo(models[0]))] == INPUT  && types1[j] == OUTPUT) //And one action is input and the other output
-                              ||(types2[i - dm_nrows(GBgetDMInfo(models[0]))] == OUTPUT && types1[j] == INPUT))){
+                            && ((types[1][i - dm_nrows(GBgetDMInfo(models[0]))] == INPUT  && types[0][j] == OUTPUT) //And one action is input and the other output
+                              ||(types[1][i - dm_nrows(GBgetDMInfo(models[0]))] == OUTPUT && types[0][j] == INPUT))){
                             correct_groups[i] = 0;//Then it should synchronize, so not act alone
                         }
                     }
@@ -401,19 +357,19 @@ create_correct_io_groups(model_t model, char *file1, char *file2){
                 int group2 = group_nr % dm_nrows(GBgetDMInfo(models[1]));//Group of second model
                 char label1[MAX_LABEL_LENGTH];
                 char label2[MAX_LABEL_LENGTH];
-                strcpy(label1, labels1[group1]);
-                strcpy(label2, labels2[group2]);
+                strcpy(label1, labels[0][group1]);
+                strcpy(label2, labels[1][group2]);
                 strip_io_label_complete(label1);//Strip the '?' or '!'
                 strip_io_label_complete(label2);//Strip the '?' or '!'
-                if(types1[group1] != RATE && types1[group1] != TAU && types1[group1] != INTERN && strcmp(label1, label2) == 0){
-                    if(types1[group1] == INPUT && types2[group2] == INPUT){
+                if(types[0][group1] != RATE && types[0][group1] != TAU && types[0][group1] != INTERN && strcmp(label1, label2) == 0){
+                    if(types[0][group1] == INPUT && types[1][group2] == INPUT){
                         correct_groups[i] = 1;
                     } else {
-                        if((types1[group1] == INPUT  && types2[group2] == OUTPUT)
-                        || (types1[group1] == OUTPUT && types2[group2] == INPUT)){//Synchronization based on input vs. output possible
+                        if((types[0][group1] == INPUT  && types[1][group2] == OUTPUT)
+                        || (types[0][group1] == OUTPUT && types[1][group2] == INPUT)){//Synchronization based on input vs. output possible
                             correct_groups[i] = 1;
                         } else {
-                            if(types1[group1] == OUTPUT && types2[group2] == OUTPUT && (labels1[group1][strlen(labels1[group1]) - 1] == '?' || labels1[group1][strlen(labels1[group1]) - 1] == '!')){
+                            if(types[0][group1] == OUTPUT && types[1][group2] == OUTPUT && (labels[0][group1][strlen(labels[0][group1]) - 1] == '?' || labels[0][group1][strlen(labels[0][group1]) - 1] == '!')){
                                 Abort("Shared output action %s!, behavior not defined.", label1);
                             } else {
                                 correct_groups[i] = 0;
@@ -438,85 +394,65 @@ create_correct_io_groups(model_t model, char *file1, char *file2){
  */
 // MAPA specific
 void
-create_correct_groups(model_t model, char *file1, char *file2){
-    FILE *f1 = fopen(file1, "r");
-    char c;
-    int group = 0;
-    char labels1[dm_nrows(GBgetDMInfo(models[0]))][MAX_LABEL_LENGTH];
-    int types1[dm_nrows(GBgetDMInfo(models[0]))];
-    while ((c = getc(f1)) != EOF){
-        if(c == '='){
-            char c1 = getc(f1);
-            if(c1 == '>'){
-                getc(f1);//Space
-                char label[MAX_LABEL_LENGTH];
-                HREassert(fscanf(f1, "%s", label) == 1);
-                strcpy(labels1[group], label);
-                if (label != NULL){
-                    switch(label[0]){
-                    case '(' :
-                        types1[group] = RATE;
-                        break;
-                    default :
-                        if (strcmp(label, "tau") == 0) {
-                            types1[group] = TAU;
-                        } else {
-                            types1[group] = INTERN;
-                        }
-                        break;
-                    }
-                }
-                group++;
-            }
+create_correct_groups(model_t model, char **files, int file_count){
+
+    int max_groups = 0;
+    for (int i = 0; i < file_count; i++){
+        if(dm_nrows(GBgetDMInfo(models[i])) > max_groups){
+            max_groups = dm_nrows(GBgetDMInfo(models[i]));
         }
     }
-    fclose(f1);
-    FILE *f2 = fopen(file2, "r");
-    group = 0;
-    char labels2[dm_nrows(GBgetDMInfo(models[1]))][100];
-    int types2[dm_nrows(GBgetDMInfo(models[1]))];
-    while ((c = getc(f2)) != EOF){
-        if(c == '='){
-            char c1 = getc(f2);
-            if(c1 == '>'){
-                getc(f2);//Space
-                char label[MAX_LABEL_LENGTH];
-                HREassert(fscanf(f2, "%s", label) == 1);
-                strcpy(labels2[group], label);
-                if (label != NULL){
-                   switch(label[0]){
-                   case '(' :
-                        types2[group] = RATE;
-                        break;
-                    default :
-                        if (strcmp(label, "tau") == 0) {
-                            types2[group] = TAU;
-                        } else {
-                            types2[group] = INTERN;
+    char labels[file_count][max_groups][MAX_LABEL_LENGTH];
+    int types[file_count][max_groups];
+    for(int i = 0; i < file_count; i++){
+        Warning(info, "File nr %d", i);
+        FILE *f = fopen(files[i], "r");
+        char c;
+        int group = 0;
+        while ((c = getc(f)) != EOF){
+            if(c == '='){
+                char c1 = getc(f);
+                if(c1 == '>'){
+                    getc(f);//Space
+                    char label[MAX_LABEL_LENGTH];
+                    HREassert(fscanf(f, "%s", label) == 1);
+                    Warning(info, "label found: %s", label);
+                    strcpy(labels[i][group], label);
+                    if (label != NULL){
+                        switch(label[0]){
+                        case '(' :
+                            types[i][group] = RATE;
+                            break;
+                        default :
+                            if (strcmp(label, "tau") == 0) {
+                                types[i][group] = TAU;
+                            } else {
+                                types[i][group] = INTERN;
+                            }
+                            break;
                         }
-                        break;
                     }
+                    group++;
                 }
-                group++;
             }
         }
+        fclose(f);
     }
-    fclose(f2);
     Warning(info, "files closed");
     correct_groups = RTmalloc(dm_nrows(GBgetDMInfo(model))*sizeof(int));
     for(int i = 0; i < dm_nrows(GBgetDMInfo(model)); i++){
         if(i < dm_nrows(GBgetDMInfo(models[0]))){//Row in model 1
-            if((types1[i] == TAU || types1[i] == RATE)){
+            if((types[0][i] == TAU || types[0][i] == RATE)){
                 correct_groups[i] = 1;//Never need to synchronize, so always execute
             } else { //intern
                 correct_groups[i] = 1;
                 char label1[MAX_LABEL_LENGTH];
-                strcpy(label1, labels1[i]);
-                strip_label_complete(label1);
+                strcpy(label1, labels[0][i]);
+                strip_label(label1);
                 for(int j = 0; j < dm_nrows(GBgetDMInfo(models[1])); j++){
                     char label2[MAX_LABEL_LENGTH];
-                    strcpy(label2, labels2[j]);
-                    strip_label_complete(label2);
+                    strcpy(label2, labels[1][j]);
+                    strip_label(label2);
                     if(strcmp(label2, label1) == 0){ //If it is the same action
                         correct_groups[i] = 0; //Then it should synchronize, so not act alone
                     }
@@ -524,18 +460,18 @@ create_correct_groups(model_t model, char *file1, char *file2){
             }
         } else {
             if(i < dm_nrows(GBgetDMInfo(models[0]))+ dm_nrows(GBgetDMInfo(models[1]))){//Row in model 2
-                if((types2[i - dm_nrows(GBgetDMInfo(models[0]))] == TAU
-                 || types2[i - dm_nrows(GBgetDMInfo(models[0]))] == RATE)){
+                if((types[1][i - dm_nrows(GBgetDMInfo(models[0]))] == TAU
+                 || types[1][i - dm_nrows(GBgetDMInfo(models[0]))] == RATE)){
                     correct_groups[i] = 1;//Never need to synchronize, so always execute
                 } else { //input or output
                     correct_groups[i] = 1;
                     char label2[MAX_LABEL_LENGTH];
-                    strcpy(label2, labels2[i  - dm_nrows(GBgetDMInfo(models[0]))]);
-                    strip_label_complete(label2);
+                    strcpy(label2, labels[1][i  - dm_nrows(GBgetDMInfo(models[0]))]);
+                    strip_label(label2);
                     for(int j = 0; j < dm_nrows(GBgetDMInfo(models[0])); j++){
                         char label1[MAX_LABEL_LENGTH];
-                        strcpy(label1, labels1[j]);
-                        strip_label_complete(label1);
+                        strcpy(label1, labels[0][j]);
+                        strip_label(label1);
                         if(strcmp(label1, label2) == 0){ //If it is the same action
                             correct_groups[i] = 0;//Then it should synchronize, so not act alone
                         }
@@ -547,11 +483,11 @@ create_correct_groups(model_t model, char *file1, char *file2){
                 int group2 = group_nr % dm_nrows(GBgetDMInfo(models[1]));//Group of second model
                 char label1[MAX_LABEL_LENGTH];
                 char label2[MAX_LABEL_LENGTH];
-                strcpy(label1, labels1[group1]);
-                strcpy(label2, labels2[group2]);
-                strip_label_complete(label1);//Strip the '?' or '!'
-                strip_label_complete(label2);//Strip the '?' or '!'
-                if(types1[group1] == INTERN && types2[group2] == INTERN && strcmp(label1, label2) == 0){
+                strcpy(label1, labels[0][group1]);
+                strcpy(label2, labels[1][group2]);
+                strip_label(label1);
+                strip_label(label2);
+                if(types[0][group1] == INTERN && types[1][group2] == INTERN && strcmp(label1, label2) == 0){
                     correct_groups[i] = 1;
                 } else {
                     correct_groups[i] = 0;
@@ -897,13 +833,13 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
         RATE = 2;
     }
     Warning(info, "Initializing awesome parallel composition layer");
-    model_count = 2;//file_count
+    model_count = file_count / 2;//file_count
 
     if(file_count < 4){
         Abort("Trying to compose with only %d input files, at least 4 needed", file_count);
     }
     models = malloc(model_count*sizeof(model_t));
-    for(int i = 0; i < 2; i++){
+    for(int i = 0; i < model_count; i++){
         models[i] = GBcreateBase();
         GBsetChunkMethods(models[i],HREgreyboxNewmap,HREglobal(),
                           HREgreyboxI2C,
@@ -980,10 +916,14 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
         GBsetGuardNESInfo(composition, p_dm_NES);
     }
     //Mapa specific
+    char** txtFiles = malloc(model_count * sizeof(char*));
+    for(int i = 0; i < model_count; i++){
+        txtFiles[i] = files[i + model_count];
+    }
     if(iomapa){
-        create_correct_io_groups(composition, files[2], files[3]);
+        create_correct_io_groups(composition, txtFiles, model_count);
     } else {
-        create_correct_groups(composition, files[2], files[3]);
+        create_correct_groups(composition, txtFiles, model_count);
     }
 
     //GBsetMatrix
