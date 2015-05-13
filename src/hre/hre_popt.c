@@ -120,7 +120,7 @@ static int HREcallPopt(int argc,char*argv[],struct poptOption optionsTable[],
             }
         }
         if (poptPeekArg(optCon)!=NULL) {
-            Print(error,"too many arguments");
+            Print(error,"too many arguments at hre_popt");
             HREprintUsage();
             return 1;
         }

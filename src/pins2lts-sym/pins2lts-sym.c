@@ -607,6 +607,7 @@ struct guard_add_info
 
 static void eval_cb (vset_t set, void *context, int *src)
 {
+    Warning(info, "eval_cb");
     // evaluate the guard
     int result = (*label_short)(model, ((struct guard_add_info*)context)->guard, src);
 
@@ -3518,7 +3519,7 @@ parity_game* compute_symbolic_parity_game(vset_t visited, int* src)
     return g;
 }
 
-static char *files[10];
+static char *files[21];
 
 
 
@@ -4280,7 +4281,7 @@ main (int argc, char *argv[])
     *(label_long) = NULL;
 #endif
 
-    HREinitStart(&argc,&argv,1,10,files, &file_count, "<model> [<etf>]");
+    HREinitStart(&argc,&argv,1,21,files, &file_count, "<model> [<etf>]");
 
 
 #ifdef HAVE_SYLVAN
