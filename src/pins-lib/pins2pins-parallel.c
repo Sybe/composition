@@ -49,7 +49,7 @@ typedef struct{
 typedef struct{
     int **map;
     int *length;
-    int *maxLength;
+    int maxLength;
 } mapping_t;         //Mapping for the action chunks
 
 static int **sync_groups;
@@ -107,9 +107,7 @@ strip_label(char* label){
 
 static int
 string_in_array(char* string, char** stringArray, int arrayLength){
-//    Warning(info, "checking string: %s", string);
     for(int i = 0; i < arrayLength ; i++){
-//        Warning(info, "checking against: %s", stringArray[i]);
         if(strcmp(string,stringArray[i]) == 0){
             return 1;
         }
@@ -122,19 +120,15 @@ string_in_array(char* string, char** stringArray, int arrayLength){
  */
 static void
 map_chunk(int model, int from, int to){
-    if(from >= map->length[model]){
-        if(map->length[model] == map->maxLength[model]){
-            int t[2*map->length[model]];
-            for(int i = 0; i < map->length[model]; i++){
-                t[i] = map->map[model][i];
-            }
-            map->maxLength[model] = map->maxLength[model] * 2;
-            free(map->map[model]);
-            map->map[model] = t;
-            map->length[model] = map->length[model] + 1;
+    if(map->length[model] == map->maxLength){
+        for(int i = 0; i < model_count; i++){
+            int *t = realloc(map->map[i], (size_t)(2*map->maxLength*sizeof(int)));
+            map->map[i] = t;
         }
+        map->maxLength = map->maxLength * 2;
     }
     map->map[model][from] = to;
+    map->length[model] += 1;
 }
 
 /**
@@ -169,7 +163,6 @@ set_chunks(model_t model){
                 nrOfLabels++;
                 for(int k = 0; k < GBchunkCount(models[i], j + 1 - bools_counted); k++){
                     chunk c = GBchunkGet(models[i], j + 1 - bools_counted, k);
-//                    Warning(info, "Putting chunck %s from model %d to type %d position %d", c.data, i, j + state_vars_counted + 1 - bools_counted, k);
                     GBchunkPutAt(model, j + state_vars_counted + 1 - bools_counted, c, k);
                 }
             } else {
@@ -189,19 +182,18 @@ set_chunks(model_t model){
  */
 void
 add_sync_group(int *groups){
-//    Warning(info, "adding (%d,%d,%d,%d,%d,%d)", groups[0], groups[1], groups[2], groups[3], groups[4], groups[5]);
     for(int i = 0; i < sync_groups_length; i++){
         int equal = 1;
         for(int j = 0; j < model_count; j++){
             equal &= (sync_groups[i][j] == groups[j]);
         }
         if(equal){
-            Abort("already added (%d,%d,%d,%d,%d,%d)", groups[0], groups[1], groups[2], groups[3], groups[4], groups[5]);
             return;
         }
     }
 
     if(sync_groups_length == sync_groups_maxLength){
+        Warning(info, "Extending sync groups")
         int *first_group = malloc(model_count * sizeof(int));
         for(int i = 0; i < model_count; i++){
             first_group[i] = sync_groups[0][i];
@@ -455,14 +447,12 @@ create_correct_io_groups(model_t model, char **files, int file_count){
 
 void
 create_groups_recursive(int groups_count, int model_count, char labels[model_count][groups_count][MAX_LABEL_LENGTH], int types[model_count][groups_count], int model, int group, char *label, int new_groups[model_count]){
-//    Warning(info, "(%d,%d,%s)", model, group, label);
     if(strcmp(label, "") == 0){
         for(int i = group; i < dm_nrows(GBgetDMInfo(models[model])); i++){
             if(types[model][i] == TAU || types[model][i] == RATE){
                 int new_group[model_count];
                 init_array(new_group, model_count);
                 new_group[model] = i;
-//                Warning(info, "adding group at 448");
                 add_sync_group(new_group);
             } else {
                 char group_label[MAX_LABEL_LENGTH];
@@ -484,7 +474,6 @@ create_groups_recursive(int groups_count, int model_count, char labels[model_cou
                     init_array(new_group, model_count);
                     new_group[model] = i;
                     if(model < model_count - 1){
-//                        Warning(info, "call at 470");
                         create_groups_recursive(groups_count, model_count, labels, types, model + 1, 0, group_label, new_group);
                         int last_added_groups[model_count];
                         int last_returned_groups[model_count];
@@ -501,8 +490,6 @@ create_groups_recursive(int groups_count, int model_count, char labels[model_cou
                                     for(int j = model + 1; j < model_count; j++){
                                         new_groups[j] = -1;
                                     }
- //                                   Warning(info, "call at 486");
-                                    //create_groups_recursive(groups_count, model_count, labels, types, model + 1, last_added_groups[model + 1], group_label, new_groups);
                                     for(int j = 0; j < model_count; j++){
                                         last_returned_groups[j] = new_groups[j];
                                     }
@@ -511,14 +498,12 @@ create_groups_recursive(int groups_count, int model_count, char labels[model_cou
                             }
                         }
                     } else {
- //                       Warning(info, "adding group at 496");
                         add_sync_group(new_group);
                     }
                 }
             }
         }
         if(model < model_count - 1){
- //           Warning(info, "call at 503");
             create_groups_recursive(groups_count, model_count, labels, types, model + 1, 0, "", NULL);
         }
     } else {
@@ -532,7 +517,6 @@ create_groups_recursive(int groups_count, int model_count, char labels[model_cou
                     synchronizing_group_found = 1;
                     new_groups[model] = i;
                     if(model < model_count - 1){
-      //                  Warning(info, "call at 518");
                         create_groups_recursive(groups_count, model_count, labels, types, model + 1, 0, label, new_groups);
                         int last_added_groups[model_count];
                         int last_returned_groups[model_count];
@@ -540,68 +524,50 @@ create_groups_recursive(int groups_count, int model_count, char labels[model_cou
                             last_returned_groups[j] = new_groups[j];
                         }
                         if(get_last_sync_group(last_added_groups) != -1){
-//                            if(last_added_groups[model] == i){
-                                int deep_group_found = 1;
-                                while(last_added_groups[model] != -1 && !compare_int_array(last_added_groups, last_returned_groups, model_count) && deep_group_found){
-                                    //Deze while loop is infinite
-                                    deep_group_found = 0;
-//                                    Warning(info, "model : %d", model);
-//                                    Warning(info, "last added:    (%d,%d,%d,%d,%d,%d)", last_added_groups[0], last_added_groups[1], last_added_groups[2], last_added_groups[3], last_added_groups[4], last_added_groups[5]);
-//                                    Warning(info, "last returned: (%d,%d,%d,%d,%d,%d)", last_returned_groups[0], last_returned_groups[1], last_returned_groups[2], last_returned_groups[3], last_returned_groups[4], last_returned_groups[5]);
-                                    for(int j = model; j < model_count; j++){
-                                        new_groups[j] = -1;
-                                    }
-//                                    Warning(info, "call at 537");
-                                    create_groups_recursive(groups_count, model_count, labels, types, model + 1, last_added_groups[model + 1], label, new_groups);
-                                    for(int j = 0; j < model_count; j++){
-                                        last_returned_groups[j] = new_groups[j];
-                                    }
-                                    get_last_sync_group(last_added_groups);
-                                    for(int j = model + 1; j < model_count; j++){
-//                                        Warning(info, "model + 1 = %d, last_returned_groups[%d] = %d", model + 1, j, last_returned_groups[j]);
-                                        deep_group_found |= last_returned_groups[j] != -1;
-                                    }
+                            int deep_group_found = 1;
+                            while(last_added_groups[model] != -1 && !compare_int_array(last_added_groups, last_returned_groups, model_count) && deep_group_found){
+                                deep_group_found = 0;
+                                for(int j = model; j < model_count; j++){
+                                    new_groups[j] = -1;
                                 }
-//                            }
+                                create_groups_recursive(groups_count, model_count, labels, types, model + 1, last_added_groups[model + 1], label, new_groups);
+                                for(int j = 0; j < model_count; j++){
+                                    last_returned_groups[j] = new_groups[j];
+                                }
+                                get_last_sync_group(last_added_groups);
+                                for(int j = model + 1; j < model_count; j++){
+                                    deep_group_found |= last_returned_groups[j] != -1;
+                                }
+                            }
                         }
                     } else {
-//                        Warning(info, "adding group at 551");
                         add_sync_group(new_groups);
                     }
                 }
             }
         }
-//        Warning(info, "line 543 found");
         //(if not just a group created and not a group with this label already created,
         int first_model_var = -1;
         int last_added_groups[model_count];
         if(get_last_sync_group(last_added_groups) != -1){
-//            Warning(info, "line 548 found");
             for(int i = 0; i < model_count && first_model_var == -1; i++){
                 if(last_added_groups[i] != -1){
                     first_model_var = i;
                 }
             }
-
-            //TODO fix deze if
             if(synchronizing_group_found){
                 //Do nothing
             } else {
-//                Warning(info, "line 558 found");
                 if(model < model_count - 1){
-//                    Warning(info, "call at 574");
                     create_groups_recursive(groups_count, model_count, labels, types, model + 1, 0, label, new_groups);
                 } else {
-//                    Warning(info, "adding group at 582");
                     add_sync_group(new_groups);
                 }
             }
         } else {
             if(model < model_count - 1){
-//                Warning(info, "call at 583");
                 create_groups_recursive(groups_count, model_count, labels, types, model + 1, 0, label, new_groups);
             } else {
-//                Warning(info, "adding group at 591");
                 add_sync_group(new_groups);
             }
         }
@@ -662,10 +628,6 @@ create_correct_groups(model_t model, char **files, int file_count){
 
     int groups[model_count];
     create_groups_recursive(max_groups, file_count, labels, types, 0, 0, "", groups);
-
-//    for(int i = 0; i < sync_groups_length; i++){
-//        Warning(info, "(%d,%d,%d,%d,%d,%d)", sync_groups[i][0], sync_groups[i][1], sync_groups[i][2], sync_groups[i][3], sync_groups[i][4], sync_groups[i][5]);
-//    }
 }
 
 
@@ -985,11 +947,11 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
     map->length = malloc(model_count * sizeof(int));
     int total_groups = 0;
     for(int i = 0; i < model_count; i++){
-        map->map[i] = malloc(10*sizeof(int));
-        map->maxLength[i] = 10;
+        map->map[i] = malloc((size_t)(10*sizeof(int)));
         map->length[i] = 0;
         total_groups += dm_nrows(GBgetDMInfo(models[i]));
     }
+    map->maxLength = 10;
 
 
     sync_groups_length = 0;
