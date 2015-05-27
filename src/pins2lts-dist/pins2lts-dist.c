@@ -571,7 +571,7 @@ empty_cost_list (void*arg,void*old_array,int old_size,struct cost_meta *new_arra
 }
 
 int main(int argc, char*argv[]){
-    char *files[10];
+    char *files[21];
     HREinitBegin(argv[0]);
     HREaddOptions(options,"Perform a distributed enumerative reachability analysis of <model>\n\nOptions");
     lts_lib_setup();
@@ -579,7 +579,7 @@ int main(int argc, char*argv[]){
     if (!SPEC_MT_SAFE){
         HREenableThreads(0, false);
     }
-    HREinitStart(&argc,&argv,1,10,files,&file_count,"<model> [<lts>]");
+    HREinitStart(&argc,&argv,1,21,files,&file_count,"<model> [<lts>]");
 
     struct dist_thread_context ctx;
     mpi_nodes=HREpeers(HREglobal());
@@ -600,7 +600,7 @@ int main(int argc, char*argv[]){
                       HREgreyboxCount);
 
     if (ctx.mpi_me == 1)//==0
-        GBloadFilesShared(model,files[0],file_count);
+        GBloadFilesShared(model,files,file_count);
     HREbarrier(HREglobal());
     GBloadFiles(model,files,file_count,&model);
 
@@ -748,7 +748,7 @@ int main(int argc, char*argv[]){
     HREbarrier(HREglobal());
     /***************************************************/
     GBgetInitialState(model,src);
-    Warning(info,"initial state:(%d,%d,%d,%d), size: %d", src[0], src[1], src[2], src[3], size);
+    Warning(info,"initial state:(%d,%d,%d,%d,%d), size: %d", src[0], src[1], src[2], src[3], src[4], size);
     Warning(info,"initial state computed at %d",ctx.mpi_me);
     if (confluence_matrix!=NULL){
       get_repr(model,confluence_matrix,src);

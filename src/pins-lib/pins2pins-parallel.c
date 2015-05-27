@@ -93,6 +93,9 @@ strip_io_label(char* label){
     }
 }
 
+/**
+ * Strips any variables in a label
+ */
 void
 strip_label(char* label){
     for(int i = 1; i < MAX_LABEL_LENGTH && label[i] != '\0'; i++){
@@ -105,6 +108,9 @@ strip_label(char* label){
     }
 }
 
+/**
+ * Checks if string is already in stringArray, an array of strings
+ */
 static int
 string_in_array(char* string, char** stringArray, int arrayLength){
     for(int i = 0; i < arrayLength ; i++){
@@ -141,6 +147,9 @@ get_chunk(int model, int from){
 
 
 // Mapa specific
+/**
+ * Sets all state label chunks after the state space generation has been done.
+ */
 void
 set_chunks(model_t model){
     int chunks_counted[lts_type_get_type_count(GBgetLTStype(model))];
@@ -191,9 +200,7 @@ add_sync_group(int *groups){
             return;
         }
     }
-
     if(sync_groups_length == sync_groups_maxLength){
-        Warning(info, "Extending sync groups")
         int *first_group = malloc(model_count * sizeof(int));
         for(int i = 0; i < model_count; i++){
             first_group[i] = sync_groups[0][i];
@@ -220,6 +227,10 @@ add_sync_group(int *groups){
     sync_groups_length++;
 }
 
+/**
+ * Returns the last added synchronization group.
+ * Returns -1 if no group has been added yet
+ */
 int
 get_last_sync_group(int *dest){
     int result;
@@ -233,6 +244,9 @@ get_last_sync_group(int *dest){
     return result;
 }
 
+/**
+ * Returns the synchronization group on position group
+ */
 int
 get_sync_group(int group, int *dest){
     int result;
@@ -245,6 +259,9 @@ get_sync_group(int group, int *dest){
     return result;
 }
 
+/**
+ * Inits an array with value -1 at all positions
+ */
 void
 init_array(int *array, int length){
     for(int i = 0; i < length; i++){
@@ -252,6 +269,9 @@ init_array(int *array, int length){
     }
 }
 
+/**
+ * Compares two arrays of int's. Returns 1 if equal, 0 if not equal
+ */
 int
 compare_int_array(int *array1, int *array2, int length){
     int equal = 1;
@@ -261,7 +281,9 @@ compare_int_array(int *array1, int *array2, int length){
     return equal;
 }
 
-
+/**
+ * Combines matrices according to the sync groups created earlier
+ */
 void
 combineMatrices(matrixCall mc, model_t *models, matrix_t *dst){
     int columns[model_count];
@@ -448,18 +470,22 @@ create_correct_io_groups(model_t model, char **files, int file_count){
 void
 create_groups_recursive(int groups_count, int model_count, char labels[model_count][groups_count][MAX_LABEL_LENGTH], int types[model_count][groups_count], int model, int group, char *label, int new_groups[model_count]){
     if(strcmp(label, "") == 0){
+        //If the label is "" a new group can be formed
         for(int i = group; i < dm_nrows(GBgetDMInfo(models[model])); i++){
             if(types[model][i] == TAU || types[model][i] == RATE){
+                //If a new group is a tau or a rate, it can be created immediately
                 int new_group[model_count];
                 init_array(new_group, model_count);
                 new_group[model] = i;
                 add_sync_group(new_group);
             } else {
+                //Else it is a action with a label
                 char group_label[MAX_LABEL_LENGTH];
                 strcpy(group_label, labels[model][i]);
                 strip_label(group_label);
                 int new_label = 1;
                 for(int j = 0; j < model && new_label; j++){
+                    //Check if this label is not present at models already evaluated
                     for(int k = 0; k < dm_nrows(GBgetDMInfo(models[j])) && new_label; k++){
                         char compare_label[MAX_LABEL_LENGTH];
                         strcpy(compare_label, labels[j][k]);
@@ -469,11 +495,13 @@ create_groups_recursive(int groups_count, int model_count, char labels[model_cou
                         }
                     }
                 }
+                //If not a new_label, it has already been created at an earlier point
                 if(new_label){
                     int new_group[model_count];
                     init_array(new_group, model_count);
                     new_group[model] = i;
                     if(model < model_count - 1){
+                        //Check recursively if the action can synchronize
                         create_groups_recursive(groups_count, model_count, labels, types, model + 1, 0, group_label, new_group);
                         int last_added_groups[model_count];
                         int last_returned_groups[model_count];
@@ -504,19 +532,24 @@ create_groups_recursive(int groups_count, int model_count, char labels[model_cou
             }
         }
         if(model < model_count - 1){
+            //If this is not the last model, run the recursion for the next model
             create_groups_recursive(groups_count, model_count, labels, types, model + 1, 0, "", NULL);
         }
     } else {
+        //If the function is called with a label, a synchronizing action should be searched
         int synchronizing_group_found = 0;
         for(int i = group; i < dm_nrows(GBgetDMInfo(models[model])); i++){
+            //Checking for all groups in this model
             if (types[model][i] == INTERN){
                 char compare_label[MAX_LABEL_LENGTH];
                 strcpy(compare_label, labels[model][i]);
                 strip_label(compare_label);
                 if(strcmp(compare_label, label) == 0){
+                    //A synchronizing action has been found
                     synchronizing_group_found = 1;
                     new_groups[model] = i;
                     if(model < model_count - 1){
+                        //If this is not the last model, the recursion goes deeper to look for a synchronizig action in the next model
                         create_groups_recursive(groups_count, model_count, labels, types, model + 1, 0, label, new_groups);
                         int last_added_groups[model_count];
                         int last_returned_groups[model_count];
@@ -526,6 +559,7 @@ create_groups_recursive(int groups_count, int model_count, char labels[model_cou
                         if(get_last_sync_group(last_added_groups) != -1){
                             int deep_group_found = 1;
                             while(last_added_groups[model] != -1 && !compare_int_array(last_added_groups, last_returned_groups, model_count) && deep_group_found){
+                                //While groups get added, we start the recursion again to find more synchronizing groups
                                 deep_group_found = 0;
                                 for(int j = model; j < model_count; j++){
                                     new_groups[j] = -1;
@@ -541,20 +575,15 @@ create_groups_recursive(int groups_count, int model_count, char labels[model_cou
                             }
                         }
                     } else {
+                        //If this is the last model, the group can be added
                         add_sync_group(new_groups);
                     }
                 }
             }
         }
         //(if not just a group created and not a group with this label already created,
-        int first_model_var = -1;
         int last_added_groups[model_count];
         if(get_last_sync_group(last_added_groups) != -1){
-            for(int i = 0; i < model_count && first_model_var == -1; i++){
-                if(last_added_groups[i] != -1){
-                    first_model_var = i;
-                }
-            }
             if(synchronizing_group_found){
                 //Do nothing
             } else {
@@ -628,29 +657,34 @@ create_correct_groups(model_t model, char **files, int file_count){
 
     int groups[model_count];
     create_groups_recursive(max_groups, file_count, labels, types, 0, 0, "", groups);
+
+    for(int i = 0; i < sync_groups_length; i++){
+        Warning(info, "groups(%d,%d,%d,%d)", sync_groups[i][0], sync_groups[i][1], sync_groups[i][2], sync_groups[i][3]);
+    }
 }
 
 
 /**
  * Basic callback function that also returns to the original callback function.
- * Used for non synchronizing groups and output groups
+ * Used for non synchronizing groups and final groups to call
  */
 static void parallel_cb (void*context,transition_info_t*transition_info,int*dst,int*cpy){
     parrallel_ctx*ctx = (parrallel_ctx*) context;
     int columns[model_count];
     int columns_total = 0;
+    //Columns represent columns in the matrices, or the number of state labels
     for(int i = 0; i < model_count; i++){
         columns[i] = lts_type_get_state_length(GBgetLTStype(models[i]));
         columns_total += columns[i];
     }
-    int dest[columns_total];
+    int dest[columns_total];//The state to return
     int cols_counted = 0;
     for(int i = 0; i < model_count; i++){
-        if(ctx->model_nr == i){
+        if(ctx->model_nr == i){//If the callback is for this model, the dest can be copied from dst
             for(int j = 0; j < columns[i]; j++){
                 dest[j + cols_counted]=dst[j];
             }
-        } else {
+        } else {//Else the dest can be copied from ctx->state which has earlier been filled by synchronizing actions
             for(int j = 0; j < columns[i]; j++){
                 dest[j + cols_counted] = ctx->state[j + cols_counted];
             }
@@ -658,34 +692,35 @@ static void parallel_cb (void*context,transition_info_t*transition_info,int*dst,
         cols_counted += columns[i];
     }
     transition_info_t ti = GB_TI(transition_info->labels, ctx->group);
-    ti.labels[3] = ctx->group;
+    ti.labels[3] = ctx->group;//Make a new transition info, and add the number of the combined group
     int actions = 0;
     for (int i = 0; i < lts_type_get_type_count(GBgetLTStype(ctx->model)); i++){
         if(strcmp(lts_type_get_type(GBgetLTStype(ctx->model), i),"action") == 0){
-            actions = i;
+            actions = i;//The type number of "action" in the combined model
         }
     }
     int old_actions = 0;
     for (int i = 0; i < lts_type_get_type_count(GBgetLTStype(models[ctx->model_nr])); i++){
         if(strcmp(lts_type_get_type(GBgetLTStype(models[ctx->model_nr]), i),"action") == 0){
-            old_actions = i;
+            old_actions = i;//The type number of "action" in the original model
         }
     }
-    chunk c = GBchunkGet(models[ctx->model_nr], old_actions, ti.labels[2]);
+    chunk c = GBchunkGet(models[ctx->model_nr], old_actions, ti.labels[2]);//The chunk of this action in the original model
     if(ctx->sync){
         char* label = malloc(MAX_LABEL_LENGTH * sizeof(char));
         strcpy(label, c.data);
         if(iomapa){
             strip_io_label(label);
         }
-        if(strcmp(label, ctx->label) == 0){
-            int pos = GBchunkPut(ctx->model, actions, c);
-            map_chunk(ctx->model_nr, ti.labels[2], pos);
+        if(strcmp(label, ctx->label) == 0){//Check if synchronization is indeed correct
+            int pos = GBchunkPut(ctx->model, actions, c);//Putting the chunk of the actionlabel in the combined model
+            map_chunk(ctx->model_nr, ti.labels[2], pos);//Make a mapping from the chunk number in the original model to the number in the combined model
             //Mapa specific
-            ti.labels[2] = get_chunk(ctx->model_nr, ti.labels[2]);
-            ctx->cb(ctx->ctx, &ti, dest, cpy);
+            ti.labels[2] = get_chunk(ctx->model_nr, ti.labels[2]);//Put the chunk number in the transition info
+            ctx->cb(ctx->ctx, &ti, dest, cpy);//Call the original callback
             ctx->result = 1;
         } else {
+            //If incorrect synchronization, return 0 and do nothing
             ctx->result = 0;
         }
     } else {
@@ -698,16 +733,19 @@ static void parallel_cb (void*context,transition_info_t*transition_info,int*dst,
     }
 }
 
-
+/**
+ * Callback function for synchronizing actions
+ * Do not call this function for the last model in a synchronization
+ */
 static void parallel_sync_cb(void*context,transition_info_t*transition_info,int*dst,int*cpy){
     parrallel_ctx*ctx = (parrallel_ctx*)context;
     int actions = 0;
     for (int i = 0; i < lts_type_get_type_count(GBgetLTStype(models[ctx->model_nr])); i++){
         if(strcmp(lts_type_get_type(GBgetLTStype(models[ctx->model_nr]), i),"action") == 0){
-            actions = i;
+            actions = i;//The type number of "action" in the original model
         }
     }
-    chunk c = GBchunkGet(models[ctx->model_nr], actions, transition_info->labels[2]);
+    chunk c = GBchunkGet(models[ctx->model_nr], actions, transition_info->labels[2]);//Getting the chunk to extract the action label
     char* label=malloc(MAX_LABEL_LENGTH * sizeof(char));
     strcpy(label, c.data);
     if(iomapa){
@@ -719,7 +757,7 @@ static void parallel_sync_cb(void*context,transition_info_t*transition_info,int*
         strcpy(ctx->label, label);
         ctx->result = 1;
     } else {
-        if (strcmp(ctx->label, label)!=0){
+        if (strcmp(ctx->label, label)!=0){//If incorrect synchronization, return a result of 0, indication that this action should not be executed
             ctx->result = 0;
         }
     }
@@ -730,7 +768,7 @@ static void parallel_sync_cb(void*context,transition_info_t*transition_info,int*
         start_column += lts_type_get_state_length(GBgetLTStype(models[i]));
     }
     for(int i = 0; i < columns; i++){
-        ctx->state[i + start_column] = dst[i];
+        ctx->state[i + start_column] = dst[i];//Filling the part of the state that changes by this transition
     }
 }
 
@@ -761,12 +799,12 @@ getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
         state_vars[i] = lts_type_get_state_length (GBgetLTStype(models[i]));
         total_groups += groups[i];
         if(sync_groups[group][i] != -1){
-            active_models[total_models] = i;
-            total_models++;
+            active_models[total_models] = i;//Creating an array of all models that take part in this transition
+            total_models++;//The number of model that take part in this transition
         }
     }
     context->state_vars = state_vars;
-    if (total_models == 1){
+    if (total_models == 1){//It is a non-synchronizing action
         context->model_nr = active_models[0];
         int state_vars_counted = 0;
         for(int i = 0; i < active_models[0]; i++){
@@ -782,20 +820,21 @@ getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
         if(iomapa){
             //TODO
         } else {
-            for(int i = 0; i < total_models - 1 && result > 0 && context->result > 0; i++){
+            for(int i = 0; i < total_models - 1 && result > 0 && context->result > 0; i++){//Loop for all synchronizing actions, except the last
+                //Loop is terminated if one of the callback functions detects incorrect synchronization, or if one of the synchronizing actions cannot be executed from current state
                 int state_vars_counted = 0;
                 for(int j = 0; j < active_models[i]; j++){
                     state_vars_counted += state_vars[j];
                 }
-                int source[state_vars[active_models[i]]];
+                int source[state_vars[active_models[i]]];//Source for this transition
                 for(int j = 0; j < state_vars[active_models[i]]; j++){
                     source[j] = src[j + state_vars_counted];
                 }
-                context->model_nr = active_models[i];
+                context->model_nr = active_models[i];//The number of the original model
 
                 result = GBgetTransitionsLong(models[active_models[i]], sync_groups[group][active_models[i]], source, parallel_sync_cb, context);
             }
-            if(result > 0 && context->result > 0){
+            if(result > 0 && context->result > 0){//For the last synchronizing action, and if synchronization is still correct
                 int state_vars_counted = 0;
                 for(int j = 0; j < active_models[total_models - 1]; j++){
                     state_vars_counted += state_vars[j];
@@ -811,28 +850,55 @@ getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
         }
     }
     context->label = NULL;
-    if(context->result == 0){
+    if(context->result == 0){//If callback detected incorrect synchronization, result is set to 0
         result = 0;
     }
     free(context);
+//    if(result > 0){
+//        Warning(info, "result: %d", result);
+//    }
     return result;
 }
+
+/**
+ * GetTransitionsAll, works only for full max progress
+ */
+int
+getTransitionsAll(model_t model,int*src,TransitionCB cb,void*context){
+    int res = 0;
+    int N=dm_nrows(GBgetDMInfo(model));
+    for(int i=0; i < N ; i++) {
+        res+=GBgetTransitionsLong(model,i,src,cb,context);
+    }
+    return res;
+}
+//    int id = GBgetMatrixID(model,LTSMIN_EDGE_TYPE_ACTION_CLASS);
+//    matrix_t *class_matrix = GBgetMatrix(model,id);
+//    int res = 0;
+//    res=GBgetTransitionsMarked(model,class_matrix,0,src,cb,context);
+//    res+=GBgetTransitionsMarked(model,class_matrix,1,src,cb,context);
+//    if (res==0){
+//        res+=GBgetTransitionsMarked(model,class_matrix,2,src,cb,context);
+//    }
+//    return res;
+//}
 
 /**
  * Implementation for GBgetStateLabelLong
  */
 int
 getStateLabelLong(model_t m, int label, int *state){
+    int result;
     int labels[model_count];
     int state_vars[model_count];
-    for(int i = 0; i<model_count; i++){
+    for(int i = 0; i < model_count; i++){
         labels[i] = lts_type_get_state_label_count(GBgetLTStype(models[i]));
         state_vars[i] = lts_type_get_state_length (GBgetLTStype(models[i]));
     }
     int labels_counted = 0;
     int state_vars_counted = 0;
     int model_found = 0;
-    int result = 0;
+
     for(int i = 0; i < model_count && !model_found; i++){
         if(label < labels[i] + labels_counted && label >= labels_counted){
             model_found = 1;
@@ -919,16 +985,17 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
         TAU = 0;
         INTERN = 1;
         RATE = 2;
-        INPUT = -1;
-        OUTPUT = -1;
+        INPUT = -1;//Not used in standard mapa
+        OUTPUT = -1;//Not used in standard mapa
     }
     Warning(info, "Initializing awesome parallel composition layer");
-    model_count = (int)(file_count / 2);//file_count
-    Warning(info, "model_count, %d", model_count);
 
     if(file_count < 4){
         Abort("Trying to compose with only %d input files, at least 4 needed", file_count);
     }
+    model_count = (int)(file_count / 2);
+    Warning(info, "model_count, %d", model_count);
+
     models = malloc(model_count*sizeof(model_t));
     for(int i = 0; i < model_count; i++){
         models[i] = GBcreateBase();
@@ -941,24 +1008,26 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
         Warning(info, "Starting loader");
         loader(models[i], files[i]);
     }
-    map = malloc(sizeof(mapping_t));
+    map = malloc(sizeof(mapping_t));//Create a chunk mapping
     map->map = malloc(model_count * sizeof(int*));
     map->maxLength = malloc(model_count * sizeof(int));
     map->length = malloc(model_count * sizeof(int));
     int total_groups = 0;
+
+    map->maxLength = 10;//Chosen arbitrary to 10
     for(int i = 0; i < model_count; i++){
-        map->map[i] = malloc((size_t)(10*sizeof(int)));
+        map->map[i] = malloc((size_t)(map->maxLength*sizeof(int)));
         map->length[i] = 0;
         total_groups += dm_nrows(GBgetDMInfo(models[i]));
     }
-    map->maxLength = 10;
-
 
     sync_groups_length = 0;
-    sync_groups_maxLength = (size_t)total_groups;
+    sync_groups_maxLength = (size_t)total_groups;//Arbitrary chosen the sum of all individual transitions in all models
     sync_groups= malloc(sync_groups_maxLength * sizeof(int*));
+
+
     //Mapa specific
-    char** txtFiles = malloc(model_count * sizeof(char*));
+    char** txtFiles = malloc(model_count * sizeof(char*));//The mlppe text files
     for(int i = 0; i < model_count; i++){
         txtFiles[i] = files[i + model_count];
     }
@@ -1056,12 +1125,14 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
                         group_type = INTERN;
                         break;
                     }
-                    if(dm_is_set(GBgetMatrix(models[j], id[j]), INPUT, sync_groups[i][j]) && group_type != OUTPUT){
-                        group_type = INTERN;
-                    }
-                    if(dm_is_set(GBgetMatrix(models[j], id[j]), OUTPUT, sync_groups[i][j])){
-                        group_type = OUTPUT;
-                        break;
+                    if(iomapa){
+                        if(dm_is_set(GBgetMatrix(models[j], id[j]), INPUT, sync_groups[i][j]) && group_type != OUTPUT){
+                            group_type = INTERN;
+                        }
+                        if(dm_is_set(GBgetMatrix(models[j], id[j]), OUTPUT, sync_groups[i][j])){
+                            group_type = OUTPUT;
+                            break;
+                        }
                     }
                 }
             }
@@ -1077,6 +1148,7 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
     //Inhibit matrix
     int inhibit_id = GBgetMatrixID(models[0], "inhibit");
     if(inhibit_id >= 0){
+        Warning(info, "setting inhibit matrix");
         static matrix_t p_dm_inhibit;
         int inhibit_rows = dm_nrows(GBgetMatrix(models[0], inhibit_id));
         int inhibit_cols = dm_ncols(GBgetMatrix(models[0], inhibit_id));
@@ -1184,9 +1256,8 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
     if(support_copy){
         GBsetSupportsCopy(composition);
     }
-
-
     GBsetNextStateLong(composition, getTransitionsLong);
+    GBsetNextStateAll(composition, getTransitionsAll);
     GBsetStateLabelLong(composition, getStateLabelLong);
     GBsetTransitionInGroup(composition, transitionInGroup);
 

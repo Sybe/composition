@@ -448,6 +448,10 @@ void common_load_model(model_t model,const char*name,int mapa){
 
     GBsetMatrix(model,LTSMIN_EDGE_TYPE_ACTION_CLASS,&context->class_matrix,PINS_STRICT,PINS_INDEX_OTHER,PINS_INDEX_GROUP);
 
+    FILE *classfile = fopen("class.txt", "w+");
+    dm_print(classfile, &context->class_matrix);
+    fclose(classfile);
+
 
     static matrix_t progress_matrixs[10];
     if(!iomapa){
