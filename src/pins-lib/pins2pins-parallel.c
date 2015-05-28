@@ -781,7 +781,11 @@ getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
 {
     parrallel_ctx *context = malloc(sizeof(parrallel_ctx));
     context->ctx = ctx;
-    context->state = src;
+    int stateLength = lts_type_get_state_length(GBgetLTStype(m));
+    context->state = malloc(stateLength * sizeof(int));
+    for(int i = 0; i < stateLength; i++){
+        context->state[i] = src[i]; //Need to copy this element wise
+    }
     context->cb = cb;
     context->group = group;
     context->sync = 0;
@@ -853,10 +857,8 @@ getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
     if(context->result == 0){//If callback detected incorrect synchronization, result is set to 0
         result = 0;
     }
+    free(context->state);
     free(context);
-//    if(result > 0){
-//        Warning(info, "result: %d", result);
-//    }
     return result;
 }
 
@@ -865,23 +867,23 @@ getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
  */
 int
 getTransitionsAll(model_t model,int*src,TransitionCB cb,void*context){
-    int res = 0;
-    int N=dm_nrows(GBgetDMInfo(model));
-    for(int i=0; i < N ; i++) {
-        res+=GBgetTransitionsLong(model,i,src,cb,context);
-    }
-    return res;
-}
-//    int id = GBgetMatrixID(model,LTSMIN_EDGE_TYPE_ACTION_CLASS);
-//    matrix_t *class_matrix = GBgetMatrix(model,id);
 //    int res = 0;
-//    res=GBgetTransitionsMarked(model,class_matrix,0,src,cb,context);
-//    res+=GBgetTransitionsMarked(model,class_matrix,1,src,cb,context);
-//    if (res==0){
-//        res+=GBgetTransitionsMarked(model,class_matrix,2,src,cb,context);
+//    int N=dm_nrows(GBgetDMInfo(model));
+//    for(int i=0; i < N ; i++) {
+//        res+=GBgetTransitionsLong(model,i,src,cb,context);
 //    }
 //    return res;
 //}
+    int id = GBgetMatrixID(model,LTSMIN_EDGE_TYPE_ACTION_CLASS);
+    matrix_t *class_matrix = GBgetMatrix(model,id);
+    int res = 0;
+    res=GBgetTransitionsMarked(model,class_matrix,0,src,cb,context);
+    res+=GBgetTransitionsMarked(model,class_matrix,1,src,cb,context);
+    if (res==0){
+        res+=GBgetTransitionsMarked(model,class_matrix,2,src,cb,context);
+    }
+    return res;
+}
 
 /**
  * Implementation for GBgetStateLabelLong
