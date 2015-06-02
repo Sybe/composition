@@ -18,7 +18,7 @@ static int model_count;     //Number of models to be composed
 static int* correct_groups; //Array of 0 and 1, 1 if the group should be evaluated
 static int bool_type;       //Boolean type
 
-static int iomapa = 0;
+static int iomapa = 1;
 
 static int TAU;
 static int INTERN;
@@ -330,6 +330,143 @@ void combineSLMatrices(model_t *models, matrix_t *dst){
         columns_created += columns[i];
     }
 }
+void
+create_io_groups_recursive(int groups_count, int model_count, char labels[model_count][groups_count][MAX_LABEL_LENGTH], int types[model_count][groups_count], int model, int group, char *label, int new_groups[model_count]){
+    if(strcmp(label, "") == 0){
+        //If the label is "" a new group can be formed
+        for(int i = group; i < dm_nrows(GBgetDMInfo(models[model])); i++){
+            if(types[model][i] == TAU || types[model][i] == RATE || types[model][i] == INTERN){
+                //If a new group is a tau, internal action or a rate, it can be created immediately
+                int new_group[model_count];
+                init_array(new_group, model_count);
+                new_group[model] = i;
+                add_sync_group(new_group);
+            } else {
+                //Else it is an input/output action
+                char group_label[MAX_LABEL_LENGTH];
+                strcpy(group_label, labels[model][i]);
+                strip_io_label(group_label);
+                int new_label = 1;
+                for(int j = 0; j < model && new_label; j++){
+                    //Check if this label is not present at models already evaluated
+                    for(int k = 0; k < dm_nrows(GBgetDMInfo(models[j])) && new_label; k++){
+                        char compare_label[MAX_LABEL_LENGTH];
+                        strcpy(compare_label, labels[j][k]);
+                        strip_io_label(compare_label);
+                        if(strcmp(group_label, compare_label) == 0){
+                            new_label = 0;
+                        }
+                    }
+                }
+                //If not a new_label, it has already been created at an earlier point
+                if(new_label){
+                    int new_group[model_count];
+                    init_array(new_group, model_count);
+                    new_group[model] = i;
+                    if(model < model_count - 1){
+                        //Check recursively if the action can synchronize
+                        create_io_groups_recursive(groups_count, model_count, labels, types, model + 1, 0, group_label, new_group);
+                        int last_added_groups[model_count];
+                        int last_returned_groups[model_count];
+                        for(int j = 0; j < model_count; j++){
+                            last_returned_groups[j] = new_group[j];
+                        }
+                        if(get_last_sync_group(last_added_groups) != -1){
+                            if(last_added_groups[model] == i){
+                                while(last_added_groups[model + 1] != -1 && compare_int_array(last_added_groups, last_returned_groups, model_count)){
+                                    if(new_groups == NULL){
+                                        new_groups = new_group;
+                                    }
+                                    new_groups[model] = i;
+                                    for(int j = model + 1; j < model_count; j++){
+                                        new_groups[j] = -1;
+                                    }
+                                    for(int j = 0; j < model_count; j++){
+                                        last_returned_groups[j] = new_groups[j];
+                                    }
+                                    get_last_sync_group(last_added_groups);
+                                }
+                            }
+                        }
+                    } else {
+                        add_sync_group(new_group);
+                    }
+                }
+            }
+        }
+        if(model < model_count - 1){
+            //If this is not the last model, run the recursion for the next model
+            create_io_groups_recursive(groups_count, model_count, labels, types, model + 1, 0, "", NULL);
+        }
+    } else {
+        //If the function is called with a label, a synchronizing action should be searched
+        int synchronizing_group_found = 0;
+        for(int i = group; i < dm_nrows(GBgetDMInfo(models[model])); i++){
+            //Checking for all groups in this model
+            if (types[model][i] == INPUT || types[model][i] == OUTPUT){
+                char compare_label[MAX_LABEL_LENGTH];
+                strcpy(compare_label, labels[model][i]);
+                strip_io_label(compare_label);
+                if(strcmp(compare_label, label) == 0){
+                    //A synchronizing action has been found
+                    synchronizing_group_found = 1;
+                    new_groups[model] = i;
+                    if(model < model_count - 1){
+                        //If this is not the last model, the recursion goes deeper to look for a synchronizig action in the next model
+                        create_io_groups_recursive(groups_count, model_count, labels, types, model + 1, 0, label, new_groups);
+                        int last_added_groups[model_count];
+                        int last_returned_groups[model_count];
+                        for(int j = 0; j < model_count; j++){
+                            last_returned_groups[j] = new_groups[j];
+                        }
+                        if(get_last_sync_group(last_added_groups) != -1){
+                            int deep_group_found = 1;
+                            while(last_added_groups[model] != -1 && !compare_int_array(last_added_groups, last_returned_groups, model_count) && deep_group_found){
+                                //While groups get added, we start the recursion again to find more synchronizing groups
+                                deep_group_found = 0;
+                                for(int j = model; j < model_count; j++){
+                                    new_groups[j] = -1;
+                                }
+                                create_io_groups_recursive(groups_count, model_count, labels, types, model + 1, last_added_groups[model + 1], label, new_groups);
+                                for(int j = 0; j < model_count; j++){
+                                    last_returned_groups[j] = new_groups[j];
+                                }
+                                get_last_sync_group(last_added_groups);
+                                for(int j = model + 1; j < model_count; j++){
+                                    deep_group_found |= last_returned_groups[j] != -1;
+                                }
+                            }
+                        }
+                    } else {
+                        //If this is the last model, the group can be added
+                        add_sync_group(new_groups);
+                    }
+                }
+            }
+        }
+        //(if not just a group created and not a group with this label already created,
+        int last_added_groups[model_count];
+        if(get_last_sync_group(last_added_groups) != -1){
+            if(synchronizing_group_found){
+                //Do nothing
+            } else {
+                if(model < model_count - 1){
+                    create_io_groups_recursive(groups_count, model_count, labels, types, model + 1, 0, label, new_groups);
+                } else {
+                    add_sync_group(new_groups);
+                }
+            }
+        } else {
+            if(model < model_count - 1){
+                create_io_groups_recursive(groups_count, model_count, labels, types, model + 1, 0, label, new_groups);
+            } else {
+                add_sync_group(new_groups);
+            }
+        }
+    }
+
+}
+
 /*
  * Reads the input txt files in mlppe format and based on those
  * creates an array which decides what groups to evaluate
@@ -387,84 +524,12 @@ create_correct_io_groups(model_t model, char **files, int file_count){
         }
     }
     Warning(info, "files closed");
-    correct_groups = RTmalloc(dm_nrows(GBgetDMInfo(model))*sizeof(int));
-    for(int i = 0; i < dm_nrows(GBgetDMInfo(model)); i++){
-        if(i < dm_nrows(GBgetDMInfo(models[0]))){//Row in model 1
-            if((types[0][i] == TAU || types[0][i] == RATE || types[0][i] == INTERN)){
-                correct_groups[i] = 1;//Never need to synchronize, so always execute
-            } else { //input or output
-                correct_groups[i] = 1;
-                char label1[MAX_LABEL_LENGTH];
-                strcpy(label1, labels[0][i]);
-                strip_io_label_complete(label1);
-                for(int j = 0; j < dm_nrows(GBgetDMInfo(models[1])); j++){
-                    char label2[MAX_LABEL_LENGTH];
-                    strcpy(label2, labels[1][j]);
-                    strip_io_label_complete(label2);//Strip the '?' or '!'
-                    if(strcmp(label2, label1) == 0 //If it is the same action
-                        && ((types[0][i] == INPUT  && types[1][j] == OUTPUT) //And one action is input and the other output
-                          ||(types[0][i] == OUTPUT && types[1][j] == INPUT))){
-                        correct_groups[i] = 0; //Then it should synchronize, so not act alone
-                    }
-                }
-            }
-        } else {
-            if(i < dm_nrows(GBgetDMInfo(models[0]))+ dm_nrows(GBgetDMInfo(models[1]))){//Row in model 2
-                if((types[1][i - dm_nrows(GBgetDMInfo(models[0]))] == TAU
-                 || types[1][i - dm_nrows(GBgetDMInfo(models[0]))] == RATE
-                 || types[1][i - dm_nrows(GBgetDMInfo(models[0]))] == INTERN)){
-                    correct_groups[i] = 1;//Never need to synchronize, so always execute
-                } else { //input or output
-                    correct_groups[i] = 1;
-                    char label2[MAX_LABEL_LENGTH];
-                    strcpy(label2, labels[1][i  - dm_nrows(GBgetDMInfo(models[0]))]);
-                    strip_io_label_complete(label2);//Strip the '?' or '!'
-                    for(int j = 0; j < dm_nrows(GBgetDMInfo(models[0])); j++){
-                        char label1[MAX_LABEL_LENGTH];
-                        strcpy(label1, labels[0][j]);
-                        strip_io_label_complete(label1);//Strip the '?' or '!'
-                        if(strcmp(label1, label2) == 0 //If it is the same action
-                            && ((types[1][i - dm_nrows(GBgetDMInfo(models[0]))] == INPUT  && types[0][j] == OUTPUT) //And one action is input and the other output
-                              ||(types[1][i - dm_nrows(GBgetDMInfo(models[0]))] == OUTPUT && types[0][j] == INPUT))){
-                            correct_groups[i] = 0;//Then it should synchronize, so not act alone
-                        }
-                    }
-                }
-            } else {//Row combined of 2 models, synchronization
-                int group_nr = i - dm_nrows(GBgetDMInfo(models[0])) - dm_nrows(GBgetDMInfo(models[1]));//Restart counting at first combined row
-                int group1 = group_nr / dm_nrows(GBgetDMInfo(models[1]));//Group of first model
-                int group2 = group_nr % dm_nrows(GBgetDMInfo(models[1]));//Group of second model
-                char label1[MAX_LABEL_LENGTH];
-                char label2[MAX_LABEL_LENGTH];
-                strcpy(label1, labels[0][group1]);
-                strcpy(label2, labels[1][group2]);
-                strip_io_label_complete(label1);//Strip the '?' or '!'
-                strip_io_label_complete(label2);//Strip the '?' or '!'
-                if(types[0][group1] != RATE && types[0][group1] != TAU && types[0][group1] != INTERN && strcmp(label1, label2) == 0){
-                    if(types[0][group1] == INPUT && types[1][group2] == INPUT){
-                        correct_groups[i] = 1;
-                    } else {
-                        if((types[0][group1] == INPUT  && types[1][group2] == OUTPUT)
-                        || (types[0][group1] == OUTPUT && types[1][group2] == INPUT)){//Synchronization based on input vs. output possible
-                            correct_groups[i] = 1;
-                        } else {
-                            if(types[0][group1] == OUTPUT && types[1][group2] == OUTPUT && (labels[0][group1][strlen(labels[0][group1]) - 1] == '?' || labels[0][group1][strlen(labels[0][group1]) - 1] == '!')){
-                                Abort("Shared output action %s!, behavior not defined.", label1);
-                            } else {
-                                correct_groups[i] = 0;
-                            }
-                        }
-                    }
-                } else {
-                    correct_groups[i] = 0;
-                }
-            }
-        }
+    int groups[model_count];
+    create_io_groups_recursive(max_groups, file_count, labels, types, 0, 0, "", groups);
+
+    for(int i = 0; i < sync_groups_length; i++){
+        Warning(info, "(%d,%d)", sync_groups[i][0], sync_groups[i][1]);
     }
-    for(int i = 0; i < dm_nrows(GBgetDMInfo(model)); i++){
-        printf("%d", correct_groups[i]);
-    }
-    printf("\n");
 }
 
 void
@@ -654,13 +719,8 @@ create_correct_groups(model_t model, char **files, int file_count){
         fclose(f);
     }
     Warning(info, "files closed");
-
     int groups[model_count];
     create_groups_recursive(max_groups, file_count, labels, types, 0, 0, "", groups);
-
-    for(int i = 0; i < sync_groups_length; i++){
-        Warning(info, "groups(%d,%d,%d,%d)", sync_groups[i][0], sync_groups[i][1], sync_groups[i][2], sync_groups[i][3]);
-    }
 }
 
 
@@ -822,8 +882,22 @@ getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
     } else {
         context->sync = 1;
         if(iomapa){
+            int id = GBgetMatrixID(m,LTSMIN_EDGE_TYPE_ACTION_CLASS);
+            if(dm_is_set(GBgetMatrix(m, id), OUTPUT, group)){
+                for(int i = 0; i < total_models - 1; i++){
+                    int local_id = GBgetMatrixID(models[active_models[i]],LTSMIN_EDGE_TYPE_ACTION_CLASS);
+                    if(dm_is_set(GBgetMatrix(models[active_models[i]], local_id), OUTPUT, sync_groups[group][active_models[i]])){
+                        int output_model = active_models[i];
+                        active_models[i] = active_models[total_models - 1];
+                        active_models[total_models - 1] = output_model;
+                    }
+                }
+            }
+
+
+
             //TODO
-        } else {
+        } //else {
             for(int i = 0; i < total_models - 1 && result > 0 && context->result > 0; i++){//Loop for all synchronizing actions, except the last
                 //Loop is terminated if one of the callback functions detects incorrect synchronization, or if one of the synchronizing actions cannot be executed from current state
                 int state_vars_counted = 0;
@@ -851,7 +925,7 @@ getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
 
                 result = GBgetTransitionsLong(models[active_models[total_models - 1]], sync_groups[group][active_models[total_models - 1]], source, parallel_cb, context);
             }
-        }
+        //}
     }
     context->label = NULL;
     if(context->result == 0){//If callback detected incorrect synchronization, result is set to 0
@@ -867,20 +941,19 @@ getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
  */
 int
 getTransitionsAll(model_t model,int*src,TransitionCB cb,void*context){
-//    int res = 0;
-//    int N=dm_nrows(GBgetDMInfo(model));
-//    for(int i=0; i < N ; i++) {
-//        res+=GBgetTransitionsLong(model,i,src,cb,context);
-//    }
-//    return res;
-//}
     int id = GBgetMatrixID(model,LTSMIN_EDGE_TYPE_ACTION_CLASS);
     matrix_t *class_matrix = GBgetMatrix(model,id);
     int res = 0;
-    res=GBgetTransitionsMarked(model,class_matrix,0,src,cb,context);
-    res+=GBgetTransitionsMarked(model,class_matrix,1,src,cb,context);
+    res=GBgetTransitionsMarked(model,class_matrix,TAU,src,cb,context);
+    res+=GBgetTransitionsMarked(model,class_matrix,INTERN,src,cb,context);
+    if(iomapa){
+        res+=GBgetTransitionsMarked(model,class_matrix,OUTPUT,src,cb,context);
+    }
     if (res==0){
-        res+=GBgetTransitionsMarked(model,class_matrix,2,src,cb,context);
+        res+=GBgetTransitionsMarked(model,class_matrix,RATE,src,cb,context);
+        if(iomapa){
+            res+=GBgetTransitionsMarked(model,class_matrix,INPUT,src,cb,context);
+        }
     }
     return res;
 }

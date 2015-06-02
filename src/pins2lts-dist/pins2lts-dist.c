@@ -748,7 +748,6 @@ int main(int argc, char*argv[]){
     HREbarrier(HREglobal());
     /***************************************************/
     GBgetInitialState(model,src);
-    Warning(info,"initial state:(%d,%d,%d,%d,%d), size: %d", src[0], src[1], src[2], src[3], src[4], size);
     Warning(info,"initial state computed at %d",ctx.mpi_me);
     if (confluence_matrix!=NULL){
       get_repr(model,confluence_matrix,src);
