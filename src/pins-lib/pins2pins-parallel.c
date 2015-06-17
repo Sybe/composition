@@ -18,7 +18,7 @@ static int model_count;     //Number of models to be composed
 static int bool_type;       //Boolean type
 
 static int iomapa = 1;
-static int input_enabled = 1;
+static int input_enabled = 0;
 
 static int *input_enabled_groups;
 
@@ -31,8 +31,6 @@ static int RATE;
 #define MAX_LABEL_LENGTH 100
 
 typedef matrix_t* (*matrixCall)(model_t model);
-
-static model_t* model_comp;
 
 typedef struct{
     void *ctx;       //Original Context
@@ -62,9 +60,7 @@ static int **sync_groups;
 static int sync_groups_length;
 static size_t sync_groups_maxLength;
 
-
 static mapping_t* map;
-
 
 /**
  * Strips the '!' or '?' from the label and any variables after that character
@@ -158,15 +154,8 @@ get_chunk(int model, int from){
  */
 void
 set_chunks(model_t model){
-    int chunks_counted[lts_type_get_type_count(GBgetLTStype(model))];
     int state_vars_counted = 0;
-    int offset = 0;
     int bools_counted = 0;
-    int total_bools = 0;
-    int bools[2];
-    for (int i = 0; i < lts_type_get_type_count(GBgetLTStype(model)); i++){
-        chunks_counted[i] = 0;
-    }
     //Dit specifiek voor states labels
     for(int i = 0; i < model_count; i++){
         int j;
@@ -185,8 +174,6 @@ set_chunks(model_t model){
             }
         }
         state_vars_counted += j - bools_counted;
-        total_bools += bools_counted;
-        bools[i] = bools_counted;
         bools_counted = 0;
     }
 }
@@ -197,7 +184,7 @@ add_input_enabled_groups(int *groups, int output_group, int last_removed, int gr
     if(groups_left > 1){
         for(int i = last_removed + 1; i < model_count; i++){
             if(groups[i] != -1 && i != output_group){
-                if(sync_groups_length == sync_groups_maxLength){
+                if(sync_groups_length == (int)sync_groups_maxLength){
                     int *first_group = malloc(model_count * sizeof(int));
                     for(int i = 0; i < model_count; i++){
                         first_group[i] = sync_groups[0][i];
@@ -218,7 +205,6 @@ add_input_enabled_groups(int *groups, int output_group, int last_removed, int gr
                     sync_groups = tmp;
                 }
                 int *newGroups = malloc(model_count * sizeof(int));
-                int total_groups = 0;
                 int output_group = -1;
                 for (int j = 0; j < model_count; j++){
                     newGroups[j] = groups[j];
@@ -248,7 +234,7 @@ add_sync_group(int *groups){
             return;
         }
     }
-    if(sync_groups_length == sync_groups_maxLength){
+    if(sync_groups_length == (int)sync_groups_maxLength){
         int *first_group = malloc(model_count * sizeof(int));
         for(int i = 0; i < model_count; i++){
             first_group[i] = sync_groups[0][i];
@@ -336,7 +322,7 @@ get_sync_group(int group, int *dest){
     if(group >= sync_groups_length){
         result = -1;
     } else {
-        dest = sync_groups[group];
+        memcpy(dest, sync_groups[group], model_count*sizeof(int));
         result = 0;
     }
     return result;
@@ -565,7 +551,7 @@ create_io_groups_recursive(int groups_count, int model_count, char labels[model_
  */
 // MAPA specific
 void
-create_correct_io_groups(model_t model, char **files, int file_count){
+create_correct_io_groups(char **files, int file_count){
 
     int max_groups = 0;
     for (int i = 0; i < file_count; i++){
@@ -577,6 +563,7 @@ create_correct_io_groups(model_t model, char **files, int file_count){
     int types[file_count][max_groups];
 
     for(int i = 0; i < file_count; i++){
+        Warning(info, "%s", files[i]);
         FILE *f = fopen(files[i], "r");
         char c;
         int group = 0;
@@ -763,7 +750,7 @@ create_groups_recursive(int groups_count, int model_count, char labels[model_cou
  */
 // MAPA specific
 void
-create_correct_groups(model_t model, char **files, int file_count){
+create_correct_groups(char **files, int file_count){
     Warning(info, "file count: %d", file_count);
     int max_groups = 0;
     for (int i = 0; i < file_count; i++){
@@ -918,11 +905,15 @@ static void parallel_sync_cb(void*context,transition_info_t*transition_info,int*
     for(int i = 0; i < columns; i++){
         ctx->state[i + start_column] = dst[i];//Filling the part of the state that changes by this transition
     }
+    (void)cpy;
 }
 
 static void label_cb(void*context,transition_info_t*transition_info,int*dst,int*cpy){
     label_ctx*ctx = (label_ctx*)context;
     ctx->label = transition_info->labels[2];
+    (void)transition_info;
+    (void)dst;
+    (void)cpy;
 }
 
 /*
@@ -1033,7 +1024,7 @@ getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
             GBgetTransitionsLong(models[active_models[total_models - 1]], sync_groups[group][active_models[total_models - 1]], source, label_cb, labelContext);
         }
         if(iomapa && input_enabled && (result == 0 || context->result == 0) && labelContext->label != -1){//TODO&& output_actie
-            int actions;
+            int actions = -1;
             for (int i = 0; i < lts_type_get_type_count(GBgetLTStype(models[failed_model])); i++){
                 if(strcmp(lts_type_get_type(GBgetLTStype(models[active_models[total_models - 1]]), i),"action") == 0){
                     actions = i;
@@ -1142,7 +1133,8 @@ getTransitionsAll(model_t model,int*src,TransitionCB cb,void*context){
  */
 int
 getStateLabelLong(model_t m, int label, int *state){
-    int result;
+    (void)m;
+    int result = -1;
     int labels[model_count];
     int state_vars[model_count];
     for(int i = 0; i < model_count; i++){
@@ -1173,6 +1165,7 @@ getStateLabelLong(model_t m, int label, int *state){
  */
 int
 transitionInGroup(model_t m, int* labels, int group){
+    (void) m;
     int groups[model_count];
     int label_count[model_count];
     for(int i = 0; i < model_count; i++){
@@ -1227,7 +1220,7 @@ matrices_present(matrixCall mc, model_t *models){
 
 //Mapa specific
 void
-GBparallelCompose (model_t composition, char **files, int file_count, pins_loader_t loader)
+GBparallelCompose (model_t composition, const char **files, int file_count, pins_loader_t loader)
 {
     if(iomapa){
         TAU = 0;
@@ -1264,7 +1257,7 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
     }
     map = malloc(sizeof(mapping_t));//Create a chunk mapping
     map->map = malloc(model_count * sizeof(int*));
-    map->maxLength = malloc(model_count * sizeof(int));
+    map->maxLength = model_count;
     map->length = malloc(model_count * sizeof(int));
     int total_groups = 0;
 
@@ -1285,13 +1278,14 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
 
     //Mapa specific
     char** txtFiles = malloc(model_count * sizeof(char*));//The mlppe text files
-    for(int i = 0; i < model_count; i++){
-        txtFiles[i] = files[i + model_count];
-    }
+    memcpy(txtFiles, &files[model_count], model_count * sizeof(char*));
+//    for(int i = 0; i < model_count; i++){
+//        txtFiles[i] = files[i + model_count];
+//    }
     if(iomapa){
-        create_correct_io_groups(composition, txtFiles, model_count);
+        create_correct_io_groups(txtFiles, model_count);
     } else {
-        create_correct_groups(composition, txtFiles, model_count);
+        create_correct_groups(txtFiles, model_count);
     }
 
     matrix_t *p_dm              = RTmalloc(sizeof(matrix_t));
@@ -1353,7 +1347,7 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
     //GBsetMatrix
     //Class matrix
     int id[model_count];
-    int rows_class;
+    int rows_class = 0;
     int class_matrix_needed = 1;
     for(int i = 0; i < model_count; i++){
         id[i] = GBgetMatrixID(models[i],LTSMIN_EDGE_TYPE_ACTION_CLASS);
@@ -1519,8 +1513,5 @@ GBparallelCompose (model_t composition, char **files, int file_count, pins_loade
     GBsetNextStateAll(composition, getTransitionsAll);
     GBsetStateLabelLong(composition, getStateLabelLong);
     GBsetTransitionInGroup(composition, transitionInGroup);
-
-    model_comp = &composition;
-
 }
 
