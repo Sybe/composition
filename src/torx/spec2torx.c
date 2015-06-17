@@ -42,6 +42,8 @@ static int          state_labels;
 static int          edge_labels;
 static treedbs_t    dbs;
 static int          file_count;
+//static FILE*        input_file;
+static FILE*        output_file;
 
 static void
 torx_transition (void *arg, transition_info_t *ti, int *dst, int *cpy)
@@ -66,6 +68,7 @@ torx_transition (void *arg, transition_info_t *ti, int *dst, int *cpy)
     
     /* tab-separated fields: edge vis sat lbl pred vars state */
     fprintf (stdout, "Ee\t\t%d\t1\t%.*s\t\t\t%d\n", vis, c.len, c.data, tmp);
+    fprintf (output_file, "Ee\t\t%d\t1\t%.*s\t\t\t%d\n", vis, c.len, c.data, tmp);
 }
 
 static int
@@ -75,6 +78,7 @@ torx_handle_request (torx_ctx_t *ctx, char *req)
     switch (req[0]) {
     case 'r':                           /* reset */
         fprintf (stdout, "R 0\t1\n");   /* initial state has index 0 */
+        fprintf (output_file, "R 0\t1\n");
         fflush (stdout);
         break;
     case 'e': {                         /* explore */
@@ -87,27 +91,34 @@ torx_handle_request (torx_ctx_t *ctx, char *req)
                 req[l - 1] = '\0';
             fprintf (stdout, "E0 Missing event number (%s; sscanf found #%d)\n",
                      req, res);
+            fprintf (output_file, "E0 Missing event number (%s; sscanf found #%d)\n",
+                                 req, res);
         } else if (n >= TreeCount (dbs)) {
             fprintf (stdout, "E0 Unknown event number\n");
+            fprintf (output_file, "E0 Unknown event number\n");
             fflush (stdout);
         } else {
             int src[N];
             TreeUnfold (dbs, n, src);
             fprintf (stdout, "EB\n");
+            fprintf (output_file, "EB\n");
             GBgetTransitionsAll (ctx->model, src, torx_transition, ctx);
             fprintf (stdout, "EE\n");
+            fprintf (output_file, "EE\n");
             fflush (stdout);
         }
         break;
     }
     case 'q': {
         fprintf (stdout, "Q\n");
+        fprintf (output_file, "Q\n");
         fflush (stdout);
         return 1;
         break;
     }
     default:                          /* unknown command */
         fprintf (stdout, "A_ERROR UnknownCommand: %s\n", req);
+        fprintf (output_file, "A_ERROR UnknownCommand: %s\n", req);
         fflush (stdout);
     }
     return 0;
@@ -119,6 +130,7 @@ torx_ui (torx_ctx_t *ctx)
     char                buf[BUFSIZ];
     int                 stop = 0;
     while (!stop && fgets (buf, sizeof buf, stdin)) {
+        fprintf(output_file, "Read: %s", buf);
         if (!strchr (buf, '\n'))
             /* incomplete read; ignore the problem for now */
             Warning (info, "no end-of-line character read on standard input (incomplete read?)\n");
@@ -130,6 +142,8 @@ int
 main (int argc, char *argv[])
 {
     char               *files[1];
+//    input_file = fopen("input.txt", "w+");
+    output_file = fopen("output.txt", "w+");
     HREinitBegin(argv[0]);
     HREaddOptions(options,"Run the TorX remote procedure call protocol on <model>.\n\nOtions");
     //lts_lib_setup(); // TODO
@@ -163,6 +177,8 @@ main (int argc, char *argv[])
 
     torx_ctx_t          ctx = { model, ltstype };
     torx_ui (&ctx);
+//    fclose(input_file);
+    fclose(output_file);
 
     HREexit (LTSMIN_EXIT_SUCCESS);
 }
