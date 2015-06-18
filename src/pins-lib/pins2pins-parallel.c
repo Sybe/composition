@@ -18,7 +18,7 @@ static int model_count;     //Number of models to be composed
 static int bool_type;       //Boolean type
 
 static int iomapa = 1;
-static int input_enabled = 0;
+static int input_enabled = 1;
 
 static int *input_enabled_groups;
 
@@ -43,7 +43,7 @@ typedef struct{
     model_t model;   //The composed model
     char* label;     //The label of the action
     int result;      //If synchronization succeeds this is set to 1, else to 0
-    int *state_vars;  //The number of state vars per model
+    int *state_vars; //The number of state vars per model
 } parrallel_ctx ;
 
 typedef struct{
@@ -358,8 +358,7 @@ combineMatrices(matrixCall mc, model_t *models, matrix_t *dst){
     int columns[model_count];
     int columns_total = 0;
     for(int i = 0; i < model_count; i++){
-        columns[i]      = dm_ncols(mc(models[i]));
-        columns_total   += columns[i];
+        columns_total += dm_ncols(mc(models[i]));
     }
     dm_create(dst, sync_groups_length, columns_total);
     for(int i = 0; i < sync_groups_length; i++){
@@ -409,7 +408,6 @@ void combineSLMatrices(model_t *models, matrix_t *dst){
 }
 void
 create_io_groups_recursive(int groups_count, int model_count, char labels[model_count][groups_count][MAX_LABEL_LENGTH], int types[model_count][groups_count], int model, int group, char *label, int new_groups[model_count]){
-//    Warning(info, "recursion");
     if(strcmp(label, "") == 0){
         //If the label is "" a new group can be formed
         for(int i = group; i < dm_nrows(GBgetDMInfo(models[model])); i++){
@@ -525,9 +523,7 @@ create_io_groups_recursive(int groups_count, int model_count, char labels[model_
         //(if not just a group created and not a group with this label already created,
         int last_added_groups[model_count];
         if(get_last_sync_group(last_added_groups) != -1){
-            if(synchronizing_group_found){
-                //Do nothing
-            } else {
+            if(!synchronizing_group_found){
                 if(model < model_count - 1){
                     create_io_groups_recursive(groups_count, model_count, labels, types, model + 1, 0, label, new_groups);
                 } else {
@@ -543,68 +539,6 @@ create_io_groups_recursive(int groups_count, int model_count, char labels[model_
         }
     }
 
-}
-
-/*
- * Reads the input txt files in mlppe format and based on those
- * creates an array which decides what groups to evaluate
- */
-// MAPA specific
-void
-create_correct_io_groups(char **files, int file_count){
-
-    int max_groups = 0;
-    for (int i = 0; i < file_count; i++){
-        if(dm_nrows(GBgetDMInfo(models[i])) > max_groups){
-            max_groups = dm_nrows(GBgetDMInfo(models[i]));
-        }
-    }
-    char labels[file_count][max_groups][MAX_LABEL_LENGTH];
-    int types[file_count][max_groups];
-
-    for(int i = 0; i < file_count; i++){
-        Warning(info, "%s", files[i]);
-        FILE *f = fopen(files[i], "r");
-        char c;
-        int group = 0;
-        while ((c = getc(f)) != EOF){
-            if(c == '='){
-                char c1 = getc(f);
-                if(c1 == '>'){
-                    getc(f);//Space
-                    char label[MAX_LABEL_LENGTH];
-                    HREassert(fscanf(f, "%s", label) == 1);
-                    strcpy(labels[i][group], label);
-                    if (label != NULL){
-                        switch(label[0]){
-                        case '(' :
-                            types[i][group] = RATE;
-                            break;
-                        default :
-                            if (strcmp(label, "tau") == 0) {
-                                types[i][group] = TAU;
-                            } else {
-                                if(strchr(label,  '?') != NULL){
-                                    types[i][group] = INPUT;
-                                } else {
-                                    if(strchr(label,  '!') != NULL){
-                                        types[i][group] = OUTPUT;
-                                    } else {
-                                        types[i][group] = INTERN;
-                                    }
-                                }
-                            }
-                            break;
-                        }
-                    }
-                    group++;
-                }
-            }
-        }
-    }
-    Warning(info, "files closed");
-    int groups[model_count];
-    create_io_groups_recursive(max_groups, file_count, labels, types, 0, 0, "", groups);
 }
 
 void
@@ -724,9 +658,7 @@ create_groups_recursive(int groups_count, int model_count, char labels[model_cou
         //(if not just a group created and not a group with this label already created,
         int last_added_groups[model_count];
         if(get_last_sync_group(last_added_groups) != -1){
-            if(synchronizing_group_found){
-                //Do nothing
-            } else {
+            if(!synchronizing_group_found){
                 if(model < model_count - 1){
                     create_groups_recursive(groups_count, model_count, labels, types, model + 1, 0, label, new_groups);
                 } else {
@@ -751,7 +683,6 @@ create_groups_recursive(int groups_count, int model_count, char labels[model_cou
 // MAPA specific
 void
 create_correct_groups(char **files, int file_count){
-    Warning(info, "file count: %d", file_count);
     int max_groups = 0;
     for (int i = 0; i < file_count; i++){
         if(dm_nrows(GBgetDMInfo(models[i])) > max_groups){
@@ -760,8 +691,9 @@ create_correct_groups(char **files, int file_count){
     }
     char labels[file_count][max_groups][MAX_LABEL_LENGTH];
     int types[file_count][max_groups];
+
     for(int i = 0; i < file_count; i++){
-        Warning(info, "File nr %d", i);
+        Warning(info, "opening mlppe file %s", files[i]);
         FILE *f = fopen(files[i], "r");
         char c;
         int group = 0;
@@ -782,7 +714,15 @@ create_correct_groups(char **files, int file_count){
                             if (strcmp(label, "tau") == 0) {
                                 types[i][group] = TAU;
                             } else {
-                                types[i][group] = INTERN;
+                                if(strchr(label,  '?') != NULL){
+                                    types[i][group] = INPUT;
+                                } else {
+                                    if(strchr(label,  '!') != NULL){
+                                        types[i][group] = OUTPUT;
+                                    } else {
+                                        types[i][group] = INTERN;
+                                    }
+                                }
                             }
                             break;
                         }
@@ -791,11 +731,14 @@ create_correct_groups(char **files, int file_count){
                 }
             }
         }
-        fclose(f);
     }
     Warning(info, "files closed");
     int groups[model_count];
-    create_groups_recursive(max_groups, file_count, labels, types, 0, 0, "", groups);
+    if(iomapa){
+        create_io_groups_recursive(max_groups, file_count, labels, types, 0, 0, "", groups);
+    } else {
+        create_groups_recursive(max_groups, file_count, labels, types, 0, 0, "", groups);
+    }
 }
 
 
@@ -1213,9 +1156,74 @@ int
 matrices_present(matrixCall mc, model_t *models){
     int result = 1;
     for(int i = 0; i < model_count; i++){
-        result = result && (mc(models[i]) != NULL);
+        result &= result && (mc(models[i]) != NULL);
     }
     return result;
+}
+
+void
+put_mapa_lts_types(lts_type_t ltstype){
+    int state_length = 0;
+    int state_label_count = 0;
+    int edge_label_count = 0;
+    for (int i = 0; i < model_count; i++){
+        state_length += lts_type_get_state_length (GBgetLTStype(models[i]));
+        state_label_count += lts_type_get_state_label_count (GBgetLTStype(models[i]));
+        edge_label_count += lts_type_get_edge_label_count (GBgetLTStype(models[i]));
+    }
+    lts_type_set_state_length(ltstype, state_length);
+    lts_type_set_state_label_count(ltstype, state_label_count);
+    lts_type_set_edge_label_count(ltstype, edge_label_count);
+
+    int state_length_counted = 0;
+    int edge_labels_counted = 0;
+    int state_labels_counted = 0;
+    for (int i = 0; i < model_count; i++){
+        char model_nr_str[2];
+        sprintf(model_nr_str, "%d", i);
+        for (int j = 0; j < lts_type_get_state_length (GBgetLTStype(models[i])); j++){
+            if(strcmp(lts_type_get_state_type(GBgetLTStype(models[i]), j), "Bool") != 0){
+                char tmp[MAX_LABEL_LENGTH];
+                strcpy(tmp, lts_type_get_state_name(GBgetLTStype(models[i]), j));
+                strcat(strcat(tmp, "_"),model_nr_str);
+                lts_type_set_state_name(ltstype, j + state_length_counted, tmp);
+                strcpy(tmp, lts_type_get_state_type(GBgetLTStype(models[i]), j));
+                strcat(strcat(tmp, "_"),model_nr_str);
+                lts_type_set_state_type(ltstype, j + state_length_counted, tmp);
+            } else {
+                lts_type_set_state_name(ltstype, j + state_length_counted, lts_type_get_state_name(GBgetLTStype(models[i]), j));
+                lts_type_set_state_type(ltstype, j + state_length_counted, lts_type_get_state_type(GBgetLTStype(models[i]), j));
+            }
+        }
+        state_length_counted += lts_type_get_state_length (GBgetLTStype(models[i]));
+        edge_labels_counted += lts_type_get_edge_label_count(GBgetLTStype(models[i]));
+        state_labels_counted += lts_type_get_state_label_count(GBgetLTStype(models[i]));
+    }
+    lts_type_put_type(ltstype,"action",LTStypeChunk,NULL);
+    lts_type_put_type(ltstype,"nat",LTStypeDirect,NULL);
+    lts_type_put_type(ltstype,"pos",LTStypeDirect,NULL);
+
+    lts_type_set_edge_label_count(ltstype,6);
+    lts_type_set_edge_label_name(ltstype,0,"reward_numerator");
+    lts_type_set_edge_label_type(ltstype,0,"nat");
+    lts_type_set_edge_label_name(ltstype,1,"reward_denominator");
+    lts_type_set_edge_label_type(ltstype,1,"pos");
+    lts_type_set_edge_label_name(ltstype,2,LTSMIN_EDGE_TYPE_ACTION_PREFIX);
+    lts_type_set_edge_label_type(ltstype,2,LTSMIN_EDGE_TYPE_ACTION_PREFIX);
+    lts_type_set_edge_label_name(ltstype,3,"group");
+    lts_type_set_edge_label_type(ltstype,3,"nat");
+    lts_type_set_edge_label_name(ltstype,4,"numerator");
+    lts_type_set_edge_label_type(ltstype,4,"nat");
+    lts_type_set_edge_label_name(ltstype,5,"denominator");
+    lts_type_set_edge_label_type(ltstype,5,"pos");
+
+    lts_type_set_state_label_count(ltstype,3);
+    lts_type_set_state_label_name(ltstype,0,"goal");
+    lts_type_set_state_label_type(ltstype,0,"Bool");
+    lts_type_set_state_label_name(ltstype,1,"state_reward_numerator");
+    lts_type_set_state_label_type(ltstype,1,"nat");
+    lts_type_set_state_label_name(ltstype,2,"state_reward_denominator");
+    lts_type_set_state_label_type(ltstype,2,"pos");
 }
 
 //Mapa specific
@@ -1241,7 +1249,6 @@ GBparallelCompose (model_t composition, const char **files, int file_count, pins
         Abort("Trying to compose with only %d input files, at least 4 needed", file_count);
     }
     model_count = (int)(file_count / 2);
-    Warning(info, "model_count, %d", model_count);
 
     models = malloc(model_count*sizeof(model_t));
     for(int i = 0; i < model_count; i++){
@@ -1252,9 +1259,10 @@ GBparallelCompose (model_t composition, const char **files, int file_count, pins
                           HREgreyboxCAtI,
                           HREgreyboxCount);
         GBsetModelNr(models[i], i);
-        Warning(info, "Starting loader");
+        Warning(info, "Starting loader for model %d", i);
         loader(models[i], files[i]);
     }
+
     map = malloc(sizeof(mapping_t));//Create a chunk mapping
     map->map = malloc(model_count * sizeof(int*));
     map->maxLength = model_count;
@@ -1279,14 +1287,8 @@ GBparallelCompose (model_t composition, const char **files, int file_count, pins
     //Mapa specific
     char** txtFiles = malloc(model_count * sizeof(char*));//The mlppe text files
     memcpy(txtFiles, &files[model_count], model_count * sizeof(char*));
-//    for(int i = 0; i < model_count; i++){
-//        txtFiles[i] = files[i + model_count];
-//    }
-    if(iomapa){
-        create_correct_io_groups(txtFiles, model_count);
-    } else {
-        create_correct_groups(txtFiles, model_count);
-    }
+
+    create_correct_groups(txtFiles, model_count);
 
     matrix_t *p_dm              = RTmalloc(sizeof(matrix_t));
     matrix_t *p_dm_read         = RTmalloc(sizeof(matrix_t));
@@ -1397,11 +1399,9 @@ GBparallelCompose (model_t composition, const char **files, int file_count, pins
         fclose(classfile);
     }
 
-
     //Inhibit matrix
     int inhibit_id = GBgetMatrixID(models[0], "inhibit");
     if(inhibit_id >= 0){
-        Warning(info, "setting inhibit matrix");
         static matrix_t p_dm_inhibit;
         int inhibit_rows = dm_nrows(GBgetMatrix(models[0], inhibit_id));
         int inhibit_cols = dm_ncols(GBgetMatrix(models[0], inhibit_id));
@@ -1419,69 +1419,7 @@ GBparallelCompose (model_t composition, const char **files, int file_count, pins
     //LTS Type
     lts_type_t ltstype = lts_type_create();
     bool_type=lts_type_put_type(ltstype,"Bool",LTStypeChunk,NULL);
-
-    int state_length = 0;
-    int state_label_count = 0;
-    int edge_label_count = 0;
-    for (int i = 0; i < model_count; i++){
-        state_length += lts_type_get_state_length (GBgetLTStype(models[i]));
-        state_label_count += lts_type_get_state_label_count (GBgetLTStype(models[i]));
-        edge_label_count += lts_type_get_edge_label_count (GBgetLTStype(models[i]));
-    }
-    lts_type_set_state_length(ltstype, state_length);
-    lts_type_set_state_label_count(ltstype, state_label_count);
-    lts_type_set_edge_label_count(ltstype, edge_label_count);
-
-    int state_length_counted = 0;
-    int edge_labels_counted = 0;
-    int state_labels_counted = 0;
-    for (int i = 0; i < model_count; i++){
-        char model_nr_str[2];
-        sprintf(model_nr_str, "%d", i);
-        for (int j = 0; j < lts_type_get_state_length (GBgetLTStype(models[i])); j++){
-            if(strcmp(lts_type_get_state_type(GBgetLTStype(models[i]), j), "Bool") != 0){
-                char tmp[MAX_LABEL_LENGTH];
-                strcpy(tmp, lts_type_get_state_name(GBgetLTStype(models[i]), j));
-                strcat(strcat(tmp, "_"),model_nr_str);
-                lts_type_set_state_name(ltstype, j + state_length_counted, tmp);
-                strcpy(tmp, lts_type_get_state_type(GBgetLTStype(models[i]), j));
-                strcat(strcat(tmp, "_"),model_nr_str);
-                lts_type_set_state_type(ltstype, j + state_length_counted, tmp);
-            } else {
-                lts_type_set_state_name(ltstype, j + state_length_counted, lts_type_get_state_name(GBgetLTStype(models[i]), j));
-                lts_type_set_state_type(ltstype, j + state_length_counted, lts_type_get_state_type(GBgetLTStype(models[i]), j));
-            }
-        }
-        state_length_counted += lts_type_get_state_length (GBgetLTStype(models[i]));
-        edge_labels_counted += lts_type_get_edge_label_count(GBgetLTStype(models[i]));
-        state_labels_counted += lts_type_get_state_label_count(GBgetLTStype(models[i]));
-    }
-    lts_type_put_type(ltstype,"action",LTStypeChunk,NULL);
-    lts_type_put_type(ltstype,"nat",LTStypeDirect,NULL);
-    lts_type_put_type(ltstype,"pos",LTStypeDirect,NULL);
-
-    lts_type_set_edge_label_count(ltstype,6);
-    lts_type_set_edge_label_name(ltstype,0,"reward_numerator");
-    lts_type_set_edge_label_type(ltstype,0,"nat");
-    lts_type_set_edge_label_name(ltstype,1,"reward_denominator");
-    lts_type_set_edge_label_type(ltstype,1,"pos");
-    lts_type_set_edge_label_name(ltstype,2,LTSMIN_EDGE_TYPE_ACTION_PREFIX);
-    lts_type_set_edge_label_type(ltstype,2,LTSMIN_EDGE_TYPE_ACTION_PREFIX);
-    lts_type_set_edge_label_name(ltstype,3,"group");
-    lts_type_set_edge_label_type(ltstype,3,"nat");
-    lts_type_set_edge_label_name(ltstype,4,"numerator");
-    lts_type_set_edge_label_type(ltstype,4,"nat");
-    lts_type_set_edge_label_name(ltstype,5,"denominator");
-    lts_type_set_edge_label_type(ltstype,5,"pos");
-
-    lts_type_set_state_label_count(ltstype,3);
-    lts_type_set_state_label_name(ltstype,0,"goal");
-    lts_type_set_state_label_type(ltstype,0,"Bool");
-    lts_type_set_state_label_name(ltstype,1,"state_reward_numerator");
-    lts_type_set_state_label_type(ltstype,1,"nat");
-    lts_type_set_state_label_name(ltstype,2,"state_reward_denominator");
-    lts_type_set_state_label_type(ltstype,2,"pos");
-
+    put_mapa_lts_types(ltstype);
     GBsetLTStype(composition, ltstype);
     GBchunkPutAt(composition,bool_type,chunk_str("F"),0);
     GBchunkPutAt(composition,bool_type,chunk_str("T"),1);
@@ -1504,7 +1442,7 @@ GBparallelCompose (model_t composition, const char **files, int file_count, pins
     //Support copy
     int support_copy = 1;
     for(int i = 0; i < model_count && support_copy; i++){
-        support_copy = support_copy && GBsupportsCopy(models[i]);
+        support_copy &= GBsupportsCopy(models[i]);
     }
     if(support_copy){
         GBsetSupportsCopy(composition);
