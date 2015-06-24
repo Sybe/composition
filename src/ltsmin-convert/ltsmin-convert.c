@@ -42,7 +42,7 @@ int main(int argc, char *argv[]){
     HREinitBegin(argv[0]);
     HREaddOptions(options,"Tool for transforming labeled transition systems\n\nOptions");
     lts_lib_setup();
-    HREinitStart(&argc,&argv,1,2,files,file_count,"<input> [<output>]");
+    HREinitStart(&argc,&argv,1,2,files,&file_count,"<input> [<output>]");
     int me=HREme(HREglobal());
     int peers=HREpeers(HREglobal());
     if (peers>1) Abort("parallelizing this tool is future work");(void)me;

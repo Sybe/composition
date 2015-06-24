@@ -1212,7 +1212,6 @@ GBloadFiles (model_t model, const char **filenames, int files, model_t *wrapped)
     if(0 != strcmp(extension, strrchr(filenames[files - 1], '.'))){
         files--;
     }
-    Warning(info,"files:%d", files);
     if (extension) {
         extension++;
         for (int i = 0; i < registered; i++) {
