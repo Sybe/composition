@@ -178,47 +178,6 @@ set_chunks(model_t model){
     }
 }
 
-//Only called if input_enabled is true
-void
-add_input_enabled_groups(int *groups, int output_group, int last_removed, int groups_left){
-    if(groups_left > 1){
-        for(int i = last_removed + 1; i < model_count; i++){
-            if(groups[i] != -1 && i != output_group){
-                if(sync_groups_length == (int)sync_groups_maxLength){
-                    int *first_group = malloc(model_count * sizeof(int));
-                    for(int i = 0; i < model_count; i++){
-                        first_group[i] = sync_groups[0][i];
-                    }
-                    input_enabled_groups = realloc(input_enabled_groups, ((size_t)(sync_groups_maxLength * 2 * sizeof(int*))));
-                    int** tmp = realloc(*sync_groups, (size_t)(sync_groups_maxLength * 2 * sizeof(int*)));
-                    sync_groups_maxLength *= 2;
-                    for(int i = 0; i < model_count; i++){
-                        tmp[0] = first_group;
-                    }
-                    for(int i = 1; i < sync_groups_length; i++){
-                        int* newGroup = malloc(model_count * sizeof(int));
-                        tmp[i] = newGroup;
-                        for(int j = 0; j < model_count; j++){
-                            tmp[i][j] = sync_groups[i][j];
-                        }
-                    }
-                    sync_groups = tmp;
-                }
-                int *newGroups = malloc(model_count * sizeof(int));
-                int output_group = -1;
-                for (int j = 0; j < model_count; j++){
-                    newGroups[j] = groups[j];
-                }
-                newGroups[i] = -1;
-                input_enabled_groups[sync_groups_length] = 1;
-                sync_groups[sync_groups_length] = newGroups;
-                sync_groups_length++;
-                add_input_enabled_groups(newGroups, output_group, i, groups_left -1);
-            }
-        }
-    }
-}
-
 /*
  * Sets a group that should synchronize according to the numbers in groups
  * A value is -1 if a group does not syncronize for this action
@@ -281,11 +240,6 @@ add_sync_group(int *groups){
         input_enabled_groups[sync_groups_length] = 0;
     }
     sync_groups_length++;
-    if(input_enabled){
-        if(output_group != -1 && total_groups > 1){
-            add_input_enabled_groups(groups, output_group, -1, total_groups);
-        }
-    }
 }
 
 /**
@@ -732,7 +686,7 @@ create_correct_groups(char **files, int file_count){
             }
         }
     }
-    Warning(info, "files closed");
+    Warning(info, "mlppe files closed");
     int groups[model_count];
     if(iomapa){
         create_io_groups_recursive(max_groups, file_count, labels, types, 0, 0, "", groups);
@@ -840,13 +794,15 @@ static void parallel_sync_cb(void*context,transition_info_t*transition_info,int*
         }
     }
     free(label);
-    int columns = lts_type_get_state_length(GBgetLTStype(models[ctx->model_nr]));
-    int start_column = 0;
-    for(int i = 0; i < ctx->model_nr; i++){
-        start_column += lts_type_get_state_length(GBgetLTStype(models[i]));
-    }
-    for(int i = 0; i < columns; i++){
-        ctx->state[i + start_column] = dst[i];//Filling the part of the state that changes by this transition
+    if(ctx->result == 1){
+        int columns = lts_type_get_state_length(GBgetLTStype(models[ctx->model_nr]));
+        int start_column = 0;
+        for(int i = 0; i < ctx->model_nr; i++){
+            start_column += lts_type_get_state_length(GBgetLTStype(models[i]));
+        }
+        for(int i = 0; i < columns; i++){
+            ctx->state[i + start_column] = dst[i];//Filling the part of the state that changes by this transition
+        }
     }
     (void)cpy;
 }
@@ -922,7 +878,7 @@ getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
             }
         }
         int failed_model = -1;
-        for(int i = 0; i < total_models - 1 && result > 0 && context->result > 0; i++){//Loop for all synchronizing actions, except the last
+        for(int i = 0; i < total_models - 1; i++){//Loop for all synchronizing actions, except the last
             //Loop is terminated if one of the callback functions detects incorrect synchronization, or if one of the synchronizing actions cannot be executed from current state
             int state_vars_counted = 0;
             for(int j = 0; j < active_models[i]; j++){
@@ -937,9 +893,82 @@ getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
             result = GBgetTransitionsLong(models[active_models[i]], sync_groups[group][active_models[i]], source, parallel_sync_cb, context);
             if(result == 0 || context->result == 0){
                 failed_model = active_models[i];
+                if(input_enabled){
+                    state_vars_counted = 0;
+                    for(int j = 0; j < active_models[total_models - 1]; j++){
+                        state_vars_counted += state_vars[j];
+                    }
+                    source[state_vars[active_models[i]]];//Source for this transition
+                    for(int j = 0; j < state_vars[total_models - 1]; j++){
+                        source[j] = src[j + state_vars_counted];
+                    }
+                    GBgetTransitionsLong(models[active_models[total_models - 1]], sync_groups[group][active_models[total_models - 1]], source, label_cb, labelContext);
+                    if(labelContext->label == -1){
+                        break;
+                    }
+                    int actions = -1;
+                    for (int j = 0; j < lts_type_get_type_count(GBgetLTStype(models[active_models[total_models - 1]])); j++){
+                        if(strcmp(lts_type_get_type(GBgetLTStype(models[active_models[total_models - 1]]), j),"action") == 0){
+                            actions = j;
+                            break;
+                        }
+                    }
+                    char output_label[MAX_LABEL_LENGTH];
+                    chunk output_chunk = GBchunkGet(models[active_models[total_models - 1]], actions, labelContext->label);
+                    strcpy(output_label, output_chunk.data);
+                    strip_io_label(output_label);
+
+                    for (int j = 0; j < lts_type_get_type_count(GBgetLTStype(models[failed_model])); j++){
+                        if(strcmp(lts_type_get_type(GBgetLTStype(models[failed_model]), j),"action") == 0){
+                            actions = j;//The type number of "action" in the original model
+                        }
+                    }
+                    int state_vars_counted = 0;
+                    for(int j = 0; j < failed_model; j++){
+                        state_vars_counted += state_vars[j];
+                    }
+                    int source[state_vars[failed_model]];
+                    for(int j = 0; j < state_vars[failed_model]; j++){
+                        source[j] = src[j + state_vars_counted];
+                    }
+                    int found = 0;
+                    for(int j = 0; j < dm_nrows(GBgetDMInfo(models[failed_model])); j++){
+                        int local_result = GBgetTransitionsLong(models[failed_model], j, source, label_cb, labelContext);
+                        if(local_result > 0){
+                            chunk c = GBchunkGet(models[failed_model], actions, labelContext->label);
+                            char local_label[MAX_LABEL_LENGTH];
+                            strcpy(local_label, c.data);
+                            strip_io_label(local_label);
+                            if(strcmp(local_label, output_label) == 0){
+                                found = 1;
+                                break;
+                            }
+                        }
+                    }
+                    if(found){
+                        break;
+                    } else {
+                        for(int j = 0; j < group; j++){
+                            if(sync_groups[j][failed_model] == sync_groups[group][failed_model]){
+                                found = 1;
+                                break;
+                            }
+                        }
+                        if(found){
+                            break;
+                        } else {
+                        result = 1;
+                        context->result = 1;
+                        }
+                    }
+                }
+                break;
             }
         }
         if(result > 0 && context->result > 0){//For the last synchronizing action, and if synchronization is still correct
+            if(context->label == NULL){
+                context->sync = 0;
+            }
             int state_vars_counted = 0;
             for(int j = 0; j < active_models[total_models - 1]; j++){
                 state_vars_counted += state_vars[j];
@@ -951,93 +980,6 @@ getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
             context->model_nr = active_models[total_models - 1];
 
             result = GBgetTransitionsLong(models[active_models[total_models - 1]], sync_groups[group][active_models[total_models - 1]], source, parallel_cb, context);
-                     GBgetTransitionsLong(models[active_models[total_models - 1]], sync_groups[group][active_models[total_models - 1]], source, label_cb, labelContext);
-            if(result == 0 || context->result == 0){
-                failed_model = active_models[total_models - 1];
-            }
-        } else if (input_enabled){
-            int state_vars_counted = 0;
-            for(int j = 0; j < active_models[total_models - 1]; j++){
-                state_vars_counted += state_vars[j];
-            }
-            int source[state_vars[active_models[total_models - 1]]];
-            for(int j = 0; j < state_vars[active_models[total_models - 1]]; j++){
-                source[j] = src[j + state_vars_counted];
-            }
-            GBgetTransitionsLong(models[active_models[total_models - 1]], sync_groups[group][active_models[total_models - 1]], source, label_cb, labelContext);
-        }
-        if(iomapa && input_enabled && (result == 0 || context->result == 0) && labelContext->label != -1){//TODO&& output_actie
-            int actions = -1;
-            for (int i = 0; i < lts_type_get_type_count(GBgetLTStype(models[failed_model])); i++){
-                if(strcmp(lts_type_get_type(GBgetLTStype(models[active_models[total_models - 1]]), i),"action") == 0){
-                    actions = i;
-                    break;
-                }
-            }
-            char output_label[MAX_LABEL_LENGTH];
-            chunk output_chunk = GBchunkGet(models[active_models[total_models -1]], actions, labelContext->label);
-            strcpy(output_label, output_chunk.data);
-            strip_io_label(output_label);
-
-
-            for (int i = 0; i < lts_type_get_type_count(GBgetLTStype(models[failed_model])); i++){
-                if(strcmp(lts_type_get_type(GBgetLTStype(models[failed_model]), i),"action") == 0){
-                    actions = i;//The type number of "action" in the original model
-                }
-            }
-            int state_vars_counted = 0;
-            for(int i = 0; i < failed_model; i++){
-                state_vars_counted += state_vars[i];
-            }
-            int source[state_vars[failed_model]];
-            for(int j = 0; j < state_vars[failed_model]; j++){
-                source[j] = src[j + state_vars_counted];
-            }
-            int found = 0;
-            for(int i = 0; i < dm_nrows(GBgetDMInfo(models[failed_model])); i++){
-                int local_result = GBgetTransitionsLong(models[failed_model], i, source, label_cb, labelContext);
-                if(local_result > 0){
-                    chunk c = GBchunkGet(models[failed_model], actions, labelContext->label);
-                    char local_label[MAX_LABEL_LENGTH];
-                    strcpy(local_label, c.data);
-                    strip_io_label(local_label);
-                    if(strcmp(local_label, output_label) == 0){
-                        found = 1;
-                        break;
-                    }
-                }
-            }
-            if(!found){
-                int ie_group_found;
-                for(int i = group + 1; i < sync_groups_length && input_enabled_groups[i]; i++){
-                    ie_group_found = 1;
-                    for(int j = 0; j < model_count; j++){
-                        if(j != failed_model){
-                            ie_group_found &= sync_groups[group][j] == sync_groups[i][j];
-                        } else {
-                            ie_group_found &= sync_groups[i][j] == -1;
-                        }
-                    }
-                    if(ie_group_found){
-                        for(int k = 0; k < group; k++){
-                            ie_group_found = 1;
-                            for(int j = 0; j < model_count; j++){
-                                if(j != failed_model){
-                                    ie_group_found &= sync_groups[group][j] == sync_groups[k][j];
-                                } else {
-                                    ie_group_found &= sync_groups[k][j] == -1;
-                                }
-                            }
-                            if(ie_group_found) break;
-                        }
-                        if(!ie_group_found){
-                            result = GBgetTransitionsLong(m, i, src, cb, ctx);
-                            context->result = result;
-                        }
-                        break;
-                    }
-                }
-            }
         }
     }
     context->label = NULL;
@@ -1103,51 +1045,6 @@ getStateLabelLong(model_t m, int label, int *state){
     return result;
 }
 
-/*
- * Implementation for GBtransitionInGroup
- */
-int
-transitionInGroup(model_t m, int* labels, int group){
-    (void) m;
-    int groups[model_count];
-    int label_count[model_count];
-    for(int i = 0; i < model_count; i++){
-        groups[i] = dm_nrows(GBgetDMInfo(models[i]));
-        label_count[i] = lts_type_get_edge_label_count(GBgetLTStype(models[i]));
-    }
-    int result = 0;
-    int groups_counted = 0;
-    int label_count_counted = 0;
-    if(group < groups[0]){
-        int labels_in_model[label_count[0]];
-        for(int j = 0; j < label_count[0]; j++){
-            labels_in_model[j] = labels[j + label_count_counted];
-        }
-        result = GBtransitionInGroup(models[0], labels_in_model, group - groups_counted);
-    } else {
-        if(group < groups[1]){
-            int labels_in_model[label_count[1]];
-            for(int j = 0; j < label_count[1]; j++){
-                labels_in_model[j] = labels[j + label_count_counted];
-            }
-            result = GBtransitionInGroup(models[1], labels_in_model, group - groups_counted);
-        } else {
-            group = group - groups[0] - groups[1];
-            int group1 = group / groups[1];
-            int group2 = group % groups[1];
-            int labels_in_model1[label_count[0]];
-            for(int j = 0; j < label_count[0]; j++){
-                labels_in_model1[j] = labels[j + label_count_counted];
-            }
-            int labels_in_model2[label_count[1]];
-            for(int j = 0; j < label_count[1]; j++){
-                labels_in_model2[j] = labels[j + label_count_counted];
-            }
-            result = GBtransitionInGroup(models[0], labels_in_model1, group1) && GBtransitionInGroup(models[1], labels_in_model2, group2);
-        }
-    }
-    return result;
-}
 
 /*
  * Checks if all models have the matrix called by mc
@@ -1450,6 +1347,6 @@ GBparallelCompose (model_t composition, const char **files, int file_count, pins
     GBsetNextStateLong(composition, getTransitionsLong);
     GBsetNextStateAll(composition, getTransitionsAll);
     GBsetStateLabelLong(composition, getStateLabelLong);
-    GBsetTransitionInGroup(composition, transitionInGroup);
+//    GBsetTransitionInGroup(composition, transitionInGroup);
 }
 
