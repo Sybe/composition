@@ -18,7 +18,7 @@ static int model_count;     //Number of models to be composed
 static int bool_type;       //Boolean type
 
 static int iomapa = 1;
-static int input_enabled = 1;
+static int input_enabled = 0;
 
 static int *input_enabled_groups;
 
