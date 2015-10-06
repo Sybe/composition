@@ -12,7 +12,7 @@
 static int check_confluence=0;
 static int enable_rewards=0;
 static int internal_max_progress=1;
-static int iomapa=1;
+static int iomapa=0;
 
 static const char const_long[]="const";
 static const char progress_long[]="max-progress";
