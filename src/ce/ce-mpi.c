@@ -49,6 +49,8 @@ int                 me,
 
 // ***************************************************************
 
+static int file_count = 0;
+
 int
 main (int argc, char **argv)
 {
@@ -61,7 +63,7 @@ main (int argc, char **argv)
     HREaddOptions(options,"Perform a distributed cycle elimination on the input.\n\nOptions");
     lts_lib_setup();
     HREselectMPI();
-    HREinitStart(&argc,&argv,1,2,files,"<input> [<output>]");
+    HREinitStart(&argc,&argv,1,2,files,file_count,"<input> [<output>]");
 
 
     MPI_Comm_size (MPI_COMM_WORLD, &nodes);

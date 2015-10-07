@@ -1,0 +1,5 @@
+F(i : int, j : int) = 
+      (j > 0 => c . F[i := mod(i + 1, j), j := mod(j + 1, 10)]) 
+    + (T => c . F[i := mod(i + 1, 10), j := mod(j + 1, 10)])
+
+Initial state: F(0, 1)

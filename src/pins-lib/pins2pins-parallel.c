@@ -822,6 +822,7 @@ static void label_cb(void*context,transition_info_t*transition_info,int*dst,int*
 int
 getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
 {
+    fflush(stdout);
     parrallel_ctx *context = malloc(sizeof(parrallel_ctx));
     label_ctx* labelContext = malloc(sizeof(label_ctx));
     labelContext->label = -1;
@@ -1127,6 +1128,10 @@ put_mapa_lts_types(lts_type_t ltstype){
 void
 GBparallelCompose (model_t composition, const char **files, int file_count, pins_loader_t loader)
 {
+    Warning(info, "GBparallelCompose");
+    GBsetNextStateLong(composition, getTransitionsLong);
+    GBsetNextStateAll(composition, getTransitionsAll);
+    GBsetStateLabelLong(composition, getStateLabelLong);
     if(iomapa){
         TAU = 0;
         INTERN = 1;
@@ -1344,9 +1349,6 @@ GBparallelCompose (model_t composition, const char **files, int file_count, pins
     if(support_copy){
         GBsetSupportsCopy(composition);
     }
-    GBsetNextStateLong(composition, getTransitionsLong);
-    GBsetNextStateAll(composition, getTransitionsAll);
-    GBsetStateLabelLong(composition, getStateLabelLong);
-//    GBsetTransitionInGroup(composition, transitionInGroup);
+
 }
 

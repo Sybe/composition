@@ -1,0 +1,17 @@
+type Jobs     = {1..2}
+type Stations = {1..2}
+
+Station(i:Stations, q:Queue, size:{0..5}) = 
+     size < 5 => <2 * i + 1> . sum(j:Jobs, arrive(j).Station[i, add(q,j), size + 1])
+  ++ size > 0                  => deliver(i,head(q)).psum(0.9 -> Station[i,tail(q),size-1] ++ 0.1 -> Station[i, q, size])
+
+Server = sum(n:{1..2}, sum(j:Jobs, poll(n,j) . <ifthenelse(F, 11, 2^j)> . complete(j) . Server[]))
+
+init Station[1,empty,0] || Station[2,empty,0] || Server[]
+
+comm (poll, deliver, copy)
+
+encap poll, deliver
+
+hide copy, arrive, complete
+

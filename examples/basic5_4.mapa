@@ -1,0 +1,5 @@
+type int = {0..9}
+
+F(i:int, j:int) = j > 0 => c . F[mod(plus(i,1),j),mod(plus(j,1),10)]
+++ c . F[mod(plus(i,1),10),mod(plus(j,1),10)]
+init F[0,1]

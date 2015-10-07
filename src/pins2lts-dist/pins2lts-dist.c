@@ -603,6 +603,7 @@ int main(int argc, char*argv[]){
         GBloadFilesShared(model,files,file_count);
     HREbarrier(HREglobal());
     GBloadFiles(model,files,file_count,&model);
+    model = GBwrapModel(model);
 
     HREbarrier(HREglobal());
     Warning(info,"model created");

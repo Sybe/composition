@@ -1,0 +1,6 @@
+X(pc : {1..4}) = 
+      (pc = 1 => (0.1) . X[pc := 2]) 
+    + (pc = 2 => tau . X[pc := 4]) 
+    + (pc = 4 => b . X[pc := 1])
+
+Initial state: X(1)

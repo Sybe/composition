@@ -42,6 +42,7 @@ static  struct poptOption options[] = {
 
 static int mpi_nodes;
 static int mpi_me;
+static int file_count = 0;
 
 int main(int argc, char*argv[]){
     char *files[2]={NULL,NULL};
@@ -49,7 +50,7 @@ int main(int argc, char*argv[]){
     HREaddOptions(options,"Perform a distributed bisimulation reduction.\n\nOptions");
     lts_lib_setup();
     HREselectMPI();
-    HREinitStart(&argc,&argv,1,2,files,"<input> [<output>]");
+    HREinitStart(&argc,&argv,1,2,files,file_count,"<input> [<output>]");
 
     MPI_Comm_size(MPI_COMM_WORLD, &mpi_nodes);
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_me);

@@ -119,6 +119,7 @@ create_pins_model ()
     Print1 (info, "Loading model from %s", files[0]);
 
     GBloadFiles (model, files, file_count, &model);
+    model = GBwrapModel(model);
 
     return model;
 }

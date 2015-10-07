@@ -1856,6 +1856,7 @@ main (int argc, char *argv[])
                       (get_count_t)HREgreyboxCount);
 
     GBloadFiles(opt.model,files,file_count,&opt.model);
+    opt.model = GBwrapModel(opt.model);
 
     lts_type_t ltstype=GBgetLTStype(opt.model);
     global.N=lts_type_get_state_length(ltstype);
