@@ -822,7 +822,6 @@ static void label_cb(void*context,transition_info_t*transition_info,int*dst,int*
 int
 getTransitionsLong (model_t m, int group, int *src, TransitionCB cb, void *ctx)
 {
-    fflush(stdout);
     parrallel_ctx *context = malloc(sizeof(parrallel_ctx));
     label_ctx* labelContext = malloc(sizeof(label_ctx));
     labelContext->label = -1;

@@ -2,4 +2,5 @@
 *.tbf
 *.so
 *.dSYM
-
+*.gcf
+*.etf

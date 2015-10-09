@@ -1220,7 +1220,7 @@ GBloadFiles (model_t model, const char **filenames, int files, model_t *wrapped)
         for (int i = 0; i < registered; i++) {
             if (0==strcmp (model_type[i], extension)) {
 
-                if (files == 1) {
+                if (files == 1 || strcmp(extension,"mapa")!=0) {
                     model_loader[i] (model, filenames[0]);
                 } else {
                     GBparallelCompose(model, filenames, files, model_loader[i]);
@@ -1343,7 +1343,7 @@ GBloadFilesShared (model_t model, const char **filenames, int files)
         extension++;
         for (int i = 0; i < registered_pre; i++) {
             if (0==strcmp (model_type_pre[i], extension)) {
-                if (files == 1){
+                if (files == 1 || strcmp(extension,"mapa")!=0){
                     model_preloader[i] (model, filenames[0]);
                 } else {
                     GBparallelCompose(model, filenames, files, model_preloader[i]);

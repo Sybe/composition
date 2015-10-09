@@ -1,0 +1,39 @@
+# include the general include file which contains the functions
+source $srcdir/lib/include.tcl
+# use the backends include file containing several 
+# procedures special for algorithmic backends
+source $srcdir/lib/backends.tcl
+
+
+#cd into the test dir such that output files are placed here.
+if { [file exists $binpaths(out) ] != 1 } {
+    file mkdir $binpaths(out)
+}
+cd $binpaths(out)
+
+puts "\n----------------------------------------------"
+puts   "TESTING: Parallel composition for Mapa language"
+puts   "----------------------------------------------\n"
+
+# the number of threads to use in multithreaded backends
+set num_threads 5
+
+# Language Mapa-frontends:
+# -------------------
+
+
+set langs [dict create]
+dict set langs mapa model "basic5.gcf" 
+dict set langs mapa options dist "$EXAMPLES_PATH/basic5_1.mapa $EXAMPLES_PATH/basic5_2.mapa $EXAMPLES_PATH/basic5_3.mapa $EXAMPLES_PATH/basic5_4.mapa $EXAMPLES_PATH/basic5_1.txt $EXAMPLES_PATH/basic5_2.txt $EXAMPLES_PATH/basic5_3.txt $EXAMPLES_PATH/basic5_4.txt"
+dict set langs mapa exp_output "19700 states 33480 transitions"
+set alg_be [ find_alg_backends "{dist}" ]
+run_test_for_alg_backends $alg_be $langs $backends
+
+# different output for symbolic tool:
+dict set langs mapa options sym "$EXAMPLES_PATH/basic5_1.mapa $EXAMPLES_PATH/basic5_2.mapa $EXAMPLES_PATH/basic5_3.mapa $EXAMPLES_PATH/basic5_4.mapa $EXAMPLES_PATH/basic5_1.txt $EXAMPLES_PATH/basic5_2.txt $EXAMPLES_PATH/basic5_3.txt $EXAMPLES_PATH/basic5_4.txt"
+dict set langs mapa exp_output "state space has 19700"
+set alg_be [ find_alg_backends "{sym}" ]
+run_test_for_alg_backends $alg_be $langs $backends
+
+
+cd ".."
